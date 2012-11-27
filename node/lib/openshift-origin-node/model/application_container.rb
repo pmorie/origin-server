@@ -139,5 +139,19 @@ module OpenShift
       }
       env
     end
+
+    # Public: Tidy application state.
+    #
+    # Performs a number of cleanup operations on gear.
+    def tidy
+      # stop app
+      # node-level tidy ops:
+      #  git prune
+      #  git gc --aggressive
+      #  empty log dir
+      #  empty tmp dir
+      # for each cart, cart tidy (will become 'control tidy'), as user
+      # start app
+    end
   end
 end

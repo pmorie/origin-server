@@ -288,6 +288,26 @@ module MCollective
         return pid, stdin, stdout, stderr
       end
 
+      def oo_tidy(cmd, args)
+        Log.instance.info "COMMAND: #{cmd}"
+
+        uuid = args['--with-container-uuid']
+        app_uuid = args['--with-app-uuid']
+
+        output = ""
+
+        begin
+          container = OpenShift::ApplicationContainer.new(app_uuid, container_uuid)
+          container.tidy
+        rescue Exception => e
+          Log.instance.info e.message
+          Log.instance.info e.backtrace
+          return -1, e.message
+        else
+          return 0, output
+        end
+      end
+
       def handle_oo_cmd(action, args)
         cmd = "oo-#{action}"
         case action
@@ -315,6 +335,8 @@ module MCollective
           rc, output = oo_get_quota(cmd, args)
         when "set-quota"
           rc, output = oo_set_quota(cmd, args)
+        when "tidy"
+          rc, output = oo_tidy(cmd, args)          
         else
           return nil, nil
         end
