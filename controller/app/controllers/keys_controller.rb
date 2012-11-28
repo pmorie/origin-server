@@ -39,9 +39,9 @@ class KeysController < BaseController
     
     @cloud_user.ssh_keys.each do |key_name, key|
       return render_error(:conflict, "SSH key with name #{name} already exists. Use a different name or delete conflicting key and retry.",
-                          120, "ADD_KEY", "name") if key_name == name
+                          120, "ADD_KEY", "name", nil, nil, false) if key_name == name
       return render_error(:conflict, "Given public key is already in use. Use different key or delete conflicting key and retry.",
-                          121, "ADD_KEY", "content") if key["key"] == content
+                          121, "ADD_KEY", "content", nil, nil, false) if key["key"] == content
     end if @cloud_user.ssh_keys
 
     begin

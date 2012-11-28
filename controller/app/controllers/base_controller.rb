@@ -255,7 +255,7 @@ class BaseController < ActionController::Base
   end
 
   def render_error_internal(status, msg, err_code=nil, log_tag=nil,
-                            field=nil, msg_type=nil, messages=nil, format=false)
+                            field=nil, msg_type=nil, messages=nil, format=false, is_error=true)
     reply = RestReply.new(status)
     user_info = get_cloud_user_info(@cloud_user)
 
@@ -273,7 +273,7 @@ class BaseController < ActionController::Base
         logger_msg = msg.join(', ')
       end
     end
-    log_action(@request_id, user_info[:uuid], user_info[:login], log_tag, false, logger_msg) if log_tag
+    log_action(@request_id, user_info[:uuid], user_info[:login], log_tag, !is_error, logger_msg) if log_tag
     render_response(reply, format)
   end
 
@@ -334,8 +334,8 @@ class BaseController < ActionController::Base
     render_success_internal(status, type, data, log_tag, log_msg, publish_msg, msg_type, messages, true)
   end
 
-  def render_error(status, msg, err_code=nil, log_tag=nil, field=nil, msg_type=nil, messages=nil)
-    render_error_internal(status, msg, err_code, log_tag, field, msg_type, messages, false)
+  def render_error(status, msg, err_code=nil, log_tag=nil, field=nil, msg_type=nil, messages=nil, is_error=true)
+    render_error_internal(status, msg, err_code, log_tag, field, msg_type, messages, false, is_error)
   end
 
   def render_exception(ex, log_tag=nil)
