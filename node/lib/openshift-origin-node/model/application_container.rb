@@ -17,6 +17,8 @@
 require 'rubygems'
 require 'openshift-origin-node/model/unix_user'
 require 'openshift-origin-node/utils/shell_exec'
+require 'openshift-origin-node/utils/application_state'
+require 'openshift-origin-node/utils/environ'
 require 'openshift-origin-node/model/frontend_proxy'
 require 'openshift-origin-common'
 require 'logger'
@@ -31,17 +33,6 @@ module OpenShift
 
     attr_reader :uuid, :application_uuid, :user
 
-    # Represents all possible application states.
-    module State
-      BUILDING = "building"
-      DEPLOYING = "deploying"
-      IDLE = "idle"
-      NEW = "new"
-      STARTED = "started"
-      STOPPED = "stopped"
-      UNKNOWN = "unknown"
-    end
-
     def initialize(application_uuid, container_uuid, user_uid = nil,
         app_name = nil, container_name = nil, namespace = nil, quota_blocks = nil, quota_files = nil, logger = nil)
       @logger = logger ||= Logger.new(STDOUT)
@@ -52,6 +43,7 @@ module OpenShift
       @application_uuid = application_uuid
       @user = UnixUser.new(application_uuid, container_uuid, user_uid,
         app_name, container_name, namespace, quota_blocks, quota_files)
+      @state = OpenShift::Utils::ApplicationState.new(container_uuid)
     end
 
     def name
@@ -120,37 +112,14 @@ module OpenShift
     # Public: Fetch application state from gear.
     # Returns app state as string on Success and 'unknown' on Failure
     def get_app_state
-      env = load_env
-      app_state_file=File.join(env[:OPENSHIFT_HOMEDIR], 'app-root', 'runtime', '.state')
-      
-      if File.exists?(app_state_file)
-        app_state = nil
-        File.open(app_state_file) { |input| app_state = input.read.chomp }
-      else
-        app_state = :UNKNOWN
-      end
-      app_state
+      @state.get
     end
 
     # Public: Sets the application state.
     #
     # new_state - The new state to assign. Must be an ApplicationContainer::State.
     def set_app_state(new_state)
-      new_state_val = nil
-      begin
-        new_state_val = State.const_get(new_state)
-      rescue
-        raise ArgumentError, "Invalid state '#{new_state}' specified"
-      end
-
-      env = load_env
-      app_state_file = File.join(env[:OPENSHIFT_HOMEDIR], 'app-root', 'runtime', '.state')
-      
-      raise "Couldn't find app state file at #{app_state_file}" unless File.exists?(app_state_file)
-
-      File.open(app_state_file, File::WRONLY|File::TRUNC|File::CREAT, 0o0660) {|file|
-        file.write "#{new_state_val}\n"
-      }
+      @start.set new_state
     end
 
     # Public: Sets the app state to "stopped" and causes an immediate forced 
@@ -158,13 +127,13 @@ module OpenShift
     #
     # TODO: exception handling
     def force_stop
-      set_app_state(:STOPPED)
+      @state.set(ApplicationState::State::STOPPED)
       UnixUser.kill_procs(@user.uid)
     end
 
 
     # Public: Cleans up the gear, providing any installed
-    # cartridges with the opportinity to perform their own
+    # cartridges with the opportunity to perform their own
     # cleanup operations via the tidy hook.
     #
     # The generic gear-level cleanup flow is:
@@ -180,8 +149,8 @@ module OpenShift
       @logger.debug("Starting tidy on gear #{@uuid}")
 
       env = load_env
-      gear_dir = env[:OPENSHIFT_HOMEDIR]
-      app_name = env[:OPENSHIFT_APP_NAME]
+      gear_dir = env[OPENSHIFT_HOMEDIR]
+      app_name = env[OPENSHIFT_APP_NAME]
       gear_repo_dir = File.join(gear_dir, 'git', "#{app_name}.git")
       gear_tmp_dir = File.join(gear_dir, '.tmp')
 
@@ -449,22 +418,7 @@ module OpenShift
     #
     # Returns env Array
     def load_env
-      env = {}
-      # Load environment variables into a hash
-      
-      Dir["#{user.homedir}/.env/*"].each { | f |
-        next if File.directory?(f)
-        contents = nil
-        File.open(f) {|input|
-          contents = input.read.chomp
-          index = contents.index('=')
-          contents = contents[(index + 1)..-1]
-          contents = contents[/'(.*)'/, 1] if contents.start_with?("'")
-          contents = contents[/"(.*)"/, 1] if contents.start_with?('"')
-        }
-        env[File.basename(f).intern] =  contents
-      }
-      env
+      Utils::Environ::for_gear(user.homedir)
     end
 
     # Converts a cartridge name to a cartridge namespace.

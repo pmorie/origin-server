@@ -39,6 +39,7 @@ class TestApplicationContainer < Test::Unit::TestCase
     config.stubs(:get).with("PORT_BEGIN").returns(@ports_begin.to_s)
     config.stubs(:get).with("PORTS_PER_USER").returns(@ports_per_user.to_s)
     config.stubs(:get).with("UID_BEGIN").returns(@uid_begin.to_s)
+    config.stubs(:get).with("GEAR_BASE_DIR").returns("/tmp")
 
     script_dir = File.expand_path(File.dirname(__FILE__))
     cart_base_path = File.join(script_dir, '..', '..', '..', 'cartridges')
