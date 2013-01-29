@@ -44,6 +44,13 @@ module OpenShift
       @user = UnixUser.new(application_uuid, container_uuid, user_uid,
         app_name, container_name, namespace, quota_blocks, quota_files)
       @state = OpenShift::Utils::ApplicationState.new(container_uuid)
+
+      # todo: encapsulate in utility method?
+      if (OpenShift::Utils::Sdk.is_new_sdk_app(@user.homedir))
+        @cart_model = V2CartridgeModel.new(config, user)
+      else
+        @cart_model = V1CartridgeModel.new(config, user)
+      end
     end
 
     def name
@@ -61,48 +68,8 @@ module OpenShift
     def destroy(skip_hooks=false)
       notify_observers(:before_container_destroy)
 
-      hook_timeout=30
-
-      output = ""
-      errout = ""
-      retcode = 0
-
-      hooks={}
-      ["pre", "post"].each do |hooktype|
-        if @user.homedir.nil? || ! File.exists?(@user.homedir)
-          hooks[hooktype]=[]
-        else
-          hooks[hooktype] = Dir.entries(@user.homedir).map { |cart|
-            [ File.join(@config.get("CARTRIDGE_BASE_PATH"),cart,"info","hooks","#{hooktype}-destroy"),
-              File.join(@config.get("CARTRIDGE_BASE_PATH"),"embedded",cart,"info","hooks","#{hooktype}-destroy"),
-            ].select { |hook| File.exists? hook }[0]
-          }.select { |hook|
-            not hook.nil?
-          }.map { |hook|
-            "#{hook} #{@user.container_name} #{@user.namespace} #{@user.container_uuid}"
-          }
-        end
-      end
-
-      unless skip_hooks
-        hooks["pre"].each do | cmd |
-          out,err,rc = shellCmd(cmd, "/", true, 0, hook_timeout)
-          errout << err if not err.nil?
-          output << out if not out.nil?
-          retcode = 121 if rc != 0
-        end
-      end
-
-      @user.destroy
-
-      unless skip_hooks
-        hooks["post"].each do | cmd |
-          out,err,rc = shellCmd(cmd, "/", true, 0, hook_timeout)
-          errout << err if not err.nil?
-          output << out if not out.nil?
-          retcode = 121 if rc != 0
-        end
-      end
+      # possible mismatch across cart model versions
+      output, errout, retcode = @cart_model.destroy
 
       notify_observers(:after_container_destroy)
 
@@ -188,25 +155,8 @@ module OpenShift
           @logger.debug("Cleaned gear temp dir at #{gear_tmp_dir}")
         end
 
-        # Execute the tidy hooks in any installed carts, in the context
-        # of the gear user. For now, we detect cart installations by iterating
-        # over the gear subdirs and using the dir names to construct a path
-        # to cart scripts in the base cartridge directory. If such a file exists,
-        # it's assumed the cart is installed on the gear.
-        cart_tidy_timeout = 30
-        Dir.entries(gear_dir).each do |gear_subdir|
-          tidy_script = File.join(@config.get("CARTRIDGE_BASE_PATH"), gear_subdir, "info", "hooks", "tidy")
-          
-          next unless File.exists?(tidy_script)
-
-          begin
-            # Execute the hook in the context of the gear user
-            @logger.debug("Executing cart tidy script #{tidy_script} in gear #{@uuid} as user #{@user.uid}:#{@user.gid}")
-            OpenShift::Utils::ShellExec.run_as(@user.uid, @user.gid, tidy_script, gear_dir, false, 0, cart_tidy_timeout)
-          rescue OpenShift::Utils::ShellExecutionException => e
-            @logger.warn("Cartridge tidy operation failed on gear #{@uuid} for cart #{gear_dir}: #{e.message} (rc=#{e.rc})")
-          end
-        end
+        # Delegate to cartridge model to perform cart-level tidy operations for all install carts.
+        @cart_model.tidy
       rescue Exception => e
         @logger.warn("An unknown exception occured during tidy for gear #{@uuid}: #{e.message}\n#{e.backtrace}")
       ensure
@@ -377,8 +327,10 @@ module OpenShift
     #
     # Raises an exception on error.
     def get_cart_manifest(cart)
-      manifest_path = File.join(@config.get("CARTRIDGE_BASE_PATH"), cart, "info", "manifest.yml")
-      return YAML.load_file(manifest_path)
+      @cart_model.get_manifest(cart)
+      # replaces:
+      # manifest_path = File.join(@config.get("CARTRIDGE_BASE_PATH"), cart, "info", "manifest.yml")
+      # return YAML.load_file(manifest_path)
     end
 
     # Compatibility function to resolve a cartridge's IP taking into account the
