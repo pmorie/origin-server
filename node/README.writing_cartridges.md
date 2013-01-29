@@ -81,6 +81,7 @@ An example `manifest.yml` file:
 ```yaml
 Name: diy-0.1
 Display-Name: diy v1.0.0 (noarch)
+Namespace: DIY
 Description: "Experimental cartridge providing a way to try unsupported languages, frameworks, and middleware on OpenShift"
 Version: 1.0.0
 License: "ASL 2.0"
@@ -176,13 +177,17 @@ Here is a `locked_files.txt` for a PHP cartridge:
     php-5.3/bin/
     php-5.3/conf/*
 
-Note in the above list the files in the `php-5.3/conf` directory are
-unlocked but the directory itself is not.  Directories like `.node-gyp`
-and `.npm` in nodejs are **NOT** candidates to be created in this
-manner as they require the gear to have read and write access while
-the application is deploying and running. These directories would need
-to be created by the nodejs `setup` script which is run while the gear
-is unlocked.
+In the above list:
+  * the file `.pearrc` will be created, if it does not exists, and be made editable.
+  * the directory `php-5.3/bin` is unlocked but not the files it contains. So you can add files.
+  * the files in `php-5.3/conf` are unlocked but the directory itself is not.
+    So you can edit files but not add files.
+
+Directories like `.node-gyp` and `.npm` in nodejs are **NOT** candidates
+to be created in this manner as they require the gear to have read
+and write access while the application is deploying and running. These
+directories would need to be created by the nodejs `setup` script which
+is run while the gear is unlocked.
 
 The following list is reserved by OpenShift in the the gear's home
 directory:
@@ -506,9 +511,7 @@ to be used for all cartridge entry points.
  * `OPENSHIFT_MYSQL_DB_SOCKET`
  * `OPENSHIFT_MYSQL_DB_URL`
  * `OPENSHIFT_MYSQL_DB_USERNAME`
- * `OPENSHIFT_PHP_IP`
  * `OPENSHIFT_PHP_LOG_DIR`
- * `OPENSHIFT_PHP_PORT`
 
 *jwh: now these are very cartridge dependent*
 
