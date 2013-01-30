@@ -21,6 +21,7 @@ module OpenShift; end
 
 require 'openshift-origin-node/model/application_container'
 require 'openshift-origin-node/model/v1_cart_model'
+require 'openshift-origin-common'
 require 'test/unit'
 require 'fileutils'
 require 'mocha'
@@ -68,7 +69,7 @@ class TestApplicationContainer < Test::Unit::TestCase
   def test_endpoint_create_php
     cart = "openshift-origin-cartridge-php-5.3"
     cart_ns = OpenShift::ApplicationContainer.cart_name_to_namespace(cart)
-    @container.stubs(:load_env).returns({"OPENSHIFT_#{cart_ns}_IP".to_sym => @gear_ip})
+    @container.stubs(:load_env).returns({"OPENSHIFT_#{cart_ns}_IP" => @gear_ip})
 
     proxy = mock('OpenShift::FrontendProxyServer')
     OpenShift::FrontendProxyServer.stubs(:new).returns(proxy)
@@ -83,7 +84,7 @@ class TestApplicationContainer < Test::Unit::TestCase
   def test_endpoint_create_jbossas7
     cart = "openshift-origin-cartridge-jbossas-7"
     cart_ns = OpenShift::ApplicationContainer.cart_name_to_namespace(cart)
-    @container.stubs(:load_env).returns({"OPENSHIFT_#{cart_ns}_IP".to_sym => @gear_ip})
+    @container.stubs(:load_env).returns({"OPENSHIFT_#{cart_ns}_IP" => @gear_ip})
 
     proxy = mock('OpenShift::FrontendProxyServer')
     OpenShift::FrontendProxyServer.stubs(:new).returns(proxy)
@@ -102,7 +103,7 @@ class TestApplicationContainer < Test::Unit::TestCase
   def test_endpoint_delete_jbossas7
     cart = "openshift-origin-cartridge-jbossas-7"
     cart_ns = OpenShift::ApplicationContainer.cart_name_to_namespace(cart)
-    @container.stubs(:load_env).returns({"OPENSHIFT_#{cart_ns}_IP".to_sym => @gear_ip})
+    @container.stubs(:load_env).returns({"OPENSHIFT_#{cart_ns}_IP" => @gear_ip})
 
     proxy = mock('OpenShift::FrontendProxyServer')
     OpenShift::FrontendProxyServer.stubs(:new).returns(proxy)
@@ -121,11 +122,47 @@ class TestApplicationContainer < Test::Unit::TestCase
     @container.delete_endpoints(cart)
   end
 
-  def test_tidy_cart_model_interaction
+  def test_tidy_success
+    @container.stubs(:load_env).returns({'OPENSHIFT_HOMEDIR' => '/foo', 'OPENSHIFT_APP_NAME' => 'app_name' })
 
+    cart_model = mock()
+
+    @container.stubs(:cart_model).returns(cart_model)
+    @container.stubs(:stop_gear).with('/foo').once
+    @container.stubs(:gear_level_tidy).with('/foo/git/app_name.git', '/foo/.tmp').once
+    cart_model.expects(:tidy).once
+    @container.stubs(:start_gear).once
+
+    @container.tidy
   end
 
-  def test_destroy_cart_model_interaction
+  def test_tidy_stop_gear_fails
+    @container.stubs(:load_env).returns({'OPENSHIFT_HOMEDIR' => '/foo', 'OPENSHIFT_APP_NAME' => 'app_name' })
 
+    cart_model = mock()
+
+    @container.stubs(:cart_model).returns(cart_model)
+    @container.stubs(:stop_gear).with('/foo').raises(Exception.new).once
+    @container.stubs(:gear_level_tidy).with('/foo/git/app_name.git', '/foo/.tmp').never
+    cart_model.expects(:tidy).never
+    @container.stubs(:start_gear).never
+
+    assert_raise Exception do 
+      @container.tidy
+    end
+  end
+
+  def test_tidy_gear_level_tidy_fails
+    @container.stubs(:load_env).returns({'OPENSHIFT_HOMEDIR' => '/foo', 'OPENSHIFT_APP_NAME' => 'app_name' })
+
+    cart_model = mock()
+
+    @container.stubs(:cart_model).returns(cart_model)
+    @container.stubs(:stop_gear).with('/foo').once
+    @container.stubs(:gear_level_tidy).with('/foo/git/app_name.git', '/foo/.tmp').raises(Exception.new).once
+    cart_model.expects(:tidy).never
+    @container.stubs(:start_gear).once
+
+    @container.tidy
   end
 end
