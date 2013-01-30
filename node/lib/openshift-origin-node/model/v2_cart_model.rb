@@ -51,5 +51,16 @@ module OpenShift
       end
     end
 
+    # Run code block against each cartridge in gear
+    #
+    # @param  [block]  Code block to process cartridge
+    # @yields [String] cartridge directory for each cartridge in gear
+    def process_cartridges
+      Dir[File.join(@user.homedir, "*-*")].each do |cart_dir|
+        next if "app-root" == cart_dir ||
+            (not File.directory? cart_dir)
+        yield cart_dir
+      end
+    end
   end
 end
