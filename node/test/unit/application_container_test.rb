@@ -20,6 +20,7 @@
 module OpenShift; end
 
 require 'openshift-origin-node/model/application_container'
+require 'openshift-origin-node/model/v1_cart_model'
 require 'test/unit'
 require 'fileutils'
 require 'mocha'
@@ -60,6 +61,8 @@ class TestApplicationContainer < Test::Unit::TestCase
 
     @container = OpenShift::ApplicationContainer.new(@gear_uuid, @gear_uuid, @user_uid,
         @app_name, @gear_uuid, @namespace, nil, nil, nil)   
+
+    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(config, nil))
   end
 
   def test_endpoint_create_php
@@ -118,4 +121,11 @@ class TestApplicationContainer < Test::Unit::TestCase
     @container.delete_endpoints(cart)
   end
 
+  def test_tidy_cart_model_interaction
+
+  end
+
+  def test_destroy_cart_model_interaction
+
+  end
 end
