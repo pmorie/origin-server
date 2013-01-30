@@ -19,6 +19,7 @@ require 'openshift-origin-node/model/unix_user'
 require 'openshift-origin-node/utils/shell_exec'
 require 'openshift-origin-node/utils/application_state'
 require 'openshift-origin-node/utils/environ'
+require 'openshift-origin-node/utils/sdk'
 require 'openshift-origin-node/model/frontend_proxy'
 require 'openshift-origin-common'
 require 'logger'
@@ -45,12 +46,16 @@ module OpenShift
         app_name, container_name, namespace, quota_blocks, quota_files)
       @state = OpenShift::Utils::ApplicationState.new(container_uuid)
 
-      # todo: encapsulate in utility method?
-      if (OpenShift::Utils::Sdk.is_new_sdk_app(@user.homedir))
-        @cart_model = V2CartridgeModel.new(config, user)
-      else
-        @cart_model = V1CartridgeModel.new(config, user)
+      # smells
+      @cart_model = nil
+    end
+
+    def cart_model
+      unless @cart_model
+        @cart_model = (OpenShift::Utils::Sdk.is_new_sdk_app(@user.homedir)) ? V2CartridgeModel.new(@config, @user) : V1CartridgeModel.new(@config, @user)
       end
+
+      @cart_model
     end
 
     def name
@@ -69,7 +74,7 @@ module OpenShift
       notify_observers(:before_container_destroy)
 
       # possible mismatch across cart model versions
-      output, errout, retcode = @cart_model.destroy
+      output, errout, retcode = cart_model.destroy
 
       notify_observers(:after_container_destroy)
 
@@ -156,7 +161,7 @@ module OpenShift
         end
 
         # Delegate to cartridge model to perform cart-level tidy operations for all install carts.
-        @cart_model.tidy
+        cart_model.tidy
       rescue Exception => e
         @logger.warn("An unknown exception occured during tidy for gear #{@uuid}: #{e.message}\n#{e.backtrace}")
       ensure
@@ -327,7 +332,7 @@ module OpenShift
     #
     # Raises an exception on error.
     def get_cart_manifest(cart)
-      @cart_model.get_manifest(cart)
+      cart_model.get_manifest(cart)
       # replaces:
       # manifest_path = File.join(@config.get("CARTRIDGE_BASE_PATH"), cart, "info", "manifest.yml")
       # return YAML.load_file(manifest_path)
