@@ -15,12 +15,14 @@
 #++
 
 require 'rubygems'
+require 'openshift-origin-node/model/frontend_proxy'
 require 'openshift-origin-node/model/unix_user'
+require 'openshift-origin-node/model/v1_cart_model'
+require 'openshift-origin-node/model/v2_cart_model'
 require 'openshift-origin-node/utils/shell_exec'
 require 'openshift-origin-node/utils/application_state'
 require 'openshift-origin-node/utils/environ'
 require 'openshift-origin-node/utils/sdk'
-require 'openshift-origin-node/model/frontend_proxy'
 require 'openshift-origin-common'
 require 'logger'
 require 'yaml'
@@ -121,11 +123,31 @@ module OpenShift
       @logger.debug("Starting tidy on gear #{@uuid}")
 
       env = load_env
-      gear_dir = env[OPENSHIFT_HOMEDIR]
-      app_name = env[OPENSHIFT_APP_NAME]
+      gear_dir = env['OPENSHIFT_HOMEDIR']
+      app_name = env['OPENSHIFT_APP_NAME']
+
       gear_repo_dir = File.join(gear_dir, 'git', "#{app_name}.git")
       gear_tmp_dir = File.join(gear_dir, '.tmp')
 
+      stop_gear(gear_dir)
+
+      # Perform the gear- and cart- level tidy actions.  At this point, the gear has
+      # been stopped; we'll attempt to start the gear no matter what tidy operations fail.
+      begin
+        gear_level_tidy(gear_repo_dir, gear_tmp_dir)
+
+        # Delegate to cartridge model to perform cart-level tidy operations for all installed carts.
+        cart_model.tidy
+      rescue Exception => e
+        @logger.warn("An unknown exception occured during tidy for gear #{@uuid}: #{e.message}\n#{e.backtrace}")
+      ensure
+        start_gear(gear_dir)
+      end
+
+      @logger.debug("Completed tidy for gear #{@uuid}")      
+    end
+
+    def stop_gear(gear_dir)
       begin
         # Stop the gear. If this fails, consider the tidy a failure.
         out, err, rc = shellCmd("/usr/sbin/oo-admin-ctl-gears stopgear #{@user.uuid}", gear_dir, false, 0)
@@ -138,49 +160,42 @@ module OpenShift
           })
         raise "Tidy failed on gear #{@uuid}; the gear couldn't be stopped successfully"
       end
+    end
 
-      # Perform the individual tidy actions. At this point, the gear has been stopped,
-      # and so we'll attempt to start the gear no matter what tidy operations fail.
+    def start_gear(gear_dir)
       begin
-        # Git pruning
-        tidy_action do
-          OpenShift::Utils::ShellExec.run_as(@user.uid, @user.gid, "git prune", gear_repo_dir, false, 0)
-          @logger.debug("Pruned git directory at #{gear_repo_dir}. Output:\n#{out}")
-        end
+        # Start the gear, and if that fails raise an exception, as the app is now
+        # in a bad state.
+        out, err, rc = shellCmd("/usr/sbin/oo-admin-ctl-gears startgear #{@user.uuid}", gear_dir)
+        @logger.debug("Started gear #{@uuid}. Output:\n#{out}")
+      rescue OpenShift::Utils::ShellExecutionException => e
+        @logger.error(%Q{
+          Failed to restart gear #{@uuid} following tidy: #{e.message}
+          --- stdout ---\n#{e.stdout}
+          --- stderr ---\n#{e.stderr}
+          })
+        raise "Tidy of gear #{@uuid} failed, and the gear was not successfuly restarted"
+      end
+    end
 
-        # Git GC
-        tidy_action do
-          OpenShift::Utils::ShellExec.run_as(@user.uid, @user.gid, "git gc --aggressive", gear_repo_dir, false, 0)
-          @logger.debug("Executed git gc for repo #{gear_repo_dir}. Output:\n#{out}")
-        end
-
-        # Temp dir cleanup
-        tidy_action do
-          FileUtils.rm_rf(Dir.glob(File.join(gear_tmp_dir, "*")))
-          @logger.debug("Cleaned gear temp dir at #{gear_tmp_dir}")
-        end
-
-        # Delegate to cartridge model to perform cart-level tidy operations for all install carts.
-        cart_model.tidy
-      rescue Exception => e
-        @logger.warn("An unknown exception occured during tidy for gear #{@uuid}: #{e.message}\n#{e.backtrace}")
-      ensure
-        begin
-          # Start the gear, and if that fails raise an exception, as the app is now
-          # in a bad state.
-          out, err, rc = shellCmd("/usr/sbin/oo-admin-ctl-gears startgear #{@user.uuid}", gear_dir)
-          @logger.debug("Started gear #{@uuid}. Output:\n#{out}")
-        rescue OpenShift::Utils::ShellExecutionException => e
-          @logger.error(%Q{
-            Failed to restart gear #{@uuid} following tidy: #{e.message}
-            --- stdout ---\n#{e.stdout}
-            --- stderr ---\n#{e.stderr}
-            })
-          raise "Tidy of gear #{@uuid} failed, and the gear was not successfuly restarted"
-        end
+    def gear_level_tidy(gear_repo_dir, gear_tmp_dir)
+      # Git pruning
+      tidy_action do
+        run_as(@user.uid, @user.gid, "git prune", gear_repo_dir, false, 0)
+        @logger.debug("Pruned git directory at #{gear_repo_dir}. Output:\n#{out}")
       end
 
-      @logger.debug("Completed tidy for gear #{@uuid}")      
+      # Git GC
+      tidy_action do
+        OpenShift::Utils::ShellExec.run_as(@user.uid, @user.gid, "git gc --aggressive", gear_repo_dir, false, 0)
+        @logger.debug("Executed git gc for repo #{gear_repo_dir}. Output:\n#{out}")
+      end
+
+      # Temp dir cleanup
+      tidy_action do
+        FileUtils.rm_rf(Dir.glob(File.join(gear_tmp_dir, "*")))
+        @logger.debug("Cleaned gear temp dir at #{gear_tmp_dir}")
+      end
     end
 
     # Executes a block, trapping ShellExecutionExceptions and treating them
@@ -353,7 +368,7 @@ module OpenShift
     def get_cart_ip(env, cart_name)
       cart_ns = self.class.cart_name_to_namespace(cart_name)
 
-      lookup_order = ["OPENSHIFT_#{cart_ns}_IP".to_sym, "OPENSHIFT_#{cart_ns}_DB_HOST".to_sym]
+      lookup_order = ["OPENSHIFT_#{cart_ns}_IP", "OPENSHIFT_#{cart_ns}_DB_HOST"]
 
       lookup_order.each do |lookup|
         return env[lookup] if env.has_key?(lookup)
