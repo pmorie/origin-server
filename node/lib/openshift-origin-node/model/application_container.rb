@@ -52,6 +52,10 @@ module OpenShift
       @cart_model = nil
     end
 
+    def name
+      @uuid
+    end
+
     def cart_model
       unless @cart_model
         @cart_model = (OpenShift::Utils::Sdk.is_new_sdk_app(@user.homedir)) ? V2CartridgeModel.new(@config, @user) : V1CartridgeModel.new(@config, @user)
@@ -60,8 +64,15 @@ module OpenShift
       @cart_model
     end
 
-    def name
-      @uuid
+    def add_cart(cart)
+      # TODO: figure out when to mark app as v2 sdk
+      OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
+
+      cart_model.add_cart(cart)
+    end
+
+    def remove_cart(cart)
+      cart_model.remove_cart(cart)
     end
 
     # Create gear - model/unix_user.rb

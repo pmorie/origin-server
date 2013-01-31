@@ -86,5 +86,13 @@ module OpenShift
       end
     end
 
+    def add_cart(cart)
+      # TODO: type to raise?
+      raise 'add_cart is not implemented for V1 cartridge model'
+    end
+
+    def remove_cart(cart)
+      raise 'remove_cart is not implements for V1 cartridge model'
+    end
   end
 end

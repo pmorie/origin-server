@@ -51,5 +51,12 @@ module OpenShift
       end
     end
 
+    def add_cart(cart)
+
+    end
+
+    def remove_cart(cart)
+
+    end
   end
 end
