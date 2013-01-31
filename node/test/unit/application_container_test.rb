@@ -157,11 +157,11 @@ class TestApplicationContainer < Test::Unit::TestCase
 
     cart_model = mock()
 
-    @container.stubs(:cart_model).returns(cart_model)
-    @container.stubs(:stop_gear).with('/foo').once
-    @container.stubs(:gear_level_tidy).with('/foo/git/app_name.git', '/foo/.tmp').raises(Exception.new).once
+    @container.expects(:cart_model).returns(cart_model)
+    @container.expects(:stop_gear).with('/foo').once
+    @container.expects(:gear_level_tidy).with('/foo/git/app_name.git', '/foo/.tmp').raises(Exception.new).once
     cart_model.expects(:tidy).never
-    @container.stubs(:start_gear).once
+    @container.expects(:start_gear).once
 
     @container.tidy
   end
