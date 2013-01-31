@@ -406,5 +406,57 @@ module OpenShift
     def self.cart_name_to_namespace(cart)
       return `echo #{cart} | sed 's/-//g' | sed 's/[^a-zA-Z_]*$//g' | tr '[a-z]' '[A-Z]'`.chomp
     end
+
+    # ---------------------------------------------------------------------
+    # This code can only be reached by v2 model cartridges
+
+    # start gear
+    def start
+      do_control("start")
+    end
+
+    # stop gear
+    def stop
+      do_control("stop")
+    end
+
+    # restart gear as supported by cartridges
+    def restart
+      do_control("restart")
+    end
+
+    # reload gear as supported by cartridges
+    def reload
+      do_control("reload")
+    end
+
+    # restore gear from tar ball
+    def restore
+      raise NotImplementedError("restore")
+    end
+
+    # write gear to tar ball
+    def snapshot
+      raise NotImplementedError("snapshot")
+    end
+
+    # PRIVATE: execute action using each cartridge's control script in gear
+    # FIXME: need to source hooks in command
+    def do_control(action)
+      gear_env = Utils::Environ.load(File.join(user.home_dir, ".env"))
+
+      @cart_model.process_cartridges { |path|
+        cartridge_env = Utils::Environ.load(File.join(path, "env")).merge(gear_env)
+
+        control       = Files.join(path, "bin", "control")
+        unless File.executable?(control)
+          raise "Corrupt cartridge: #{control} must exists and be executable"
+        end
+
+        command = control + " " + action
+        Utils::spawn(cartridge_env, command, user.home_dir)
+      }
+    end
+    # ---------------------------------------------------------------------
   end
 end

@@ -28,17 +28,24 @@ OpenShift. You may have additional directories or files.
      |  +- setup                   (required)
      |  +- teardown                (optional)
      |  +- control                 (required)
-     |  +- build                   (optional)
      +- versions                   (discretionary)
      |  +- `cartridge name`-`software version`
      |  |  +- bin
-     |  |     +- build
+     |  |     +- ...
      |  |  +- data
-     |  |     +- git_template.git
-     |  |        +- ... (bare git repository)
+     |  |     +- template          (optional)
+     |  |        +- .openshift
+     |  |        |   +- ...
+     |  |        +- ... (directory/file tree)
+     |  |     +- template.git       (discretionary)
+     |  |        +- ... (git bare repo)
      |  +- ...
      +- env                        (required)
      |  +- *.erb
+     +- template                   (optional)
+     |  +- ... (directory/file tree)
+     +  template.git               (discretionary)
+     +  +- ... (bare git repository)
      +- opt                        (optional)
      |  +- ...
      +- metadata
@@ -201,6 +208,65 @@ You may create any hidden file or directory (one that starts with a
 period) not in the reserved list in the gear's home directory while the
 cartridge is unlocked.
 
+## template vs template.git (for language cartridges)
+
+`template` or `template.git` directory provides an minimal example of a web application
+written in the language/framework your cartridge is providing.
+Your application should welcome the application developer to
+your cartridge and let them see that your cartridge has indeed been installed.
+If you provide a `template` directory, OpenShift will transform it into a bare git repository
+for use by the application developer. If you provide a `template.git` directory, OpenShift will
+copy the directory for use by the application developer. Your `setup` script should assume that
+`template` directories may be converted to `template.git` during the packaging of your cartridge
+for use by OpenShift. The PaaS operator may choose to convert all `template` directories to bare
+git repositories `template.git` to obtain the performance gain when adding your cartridge to gear.
+One good workflow point to make this change is when your cartridge is packaged into an RPM.
+
+A `ruby 1.8` with `Passenger` support would have a `public` sub-directory and
+a `config.ru` file to define the web application.
+
+    +- template
+    |  +- config.ru
+    |  +- public
+    |  |  +- .gitignore
+
+Note that .gitignore should be placed in empty directories to ensure they survive when the file tree
+is loaded into a git repository.
+
+The sub-directory `markers` may contain files created by the application developer
+that denote behaviour you are expected to honor in your cartridges lifecycle. Current
+examples from a Ruby 1.8 cartridge include:
+
+    force_clean_build     Previous output from bundle install --deployment will be
+                          removed and all gems will be reinstalled according to the
+                          current Gemfile/Gemfile.lock.
+    hot_deploy            Will prevent the apache process from being restarted during
+                          build/deployment. Note that mod_passenger will respawn the
+                          Rack worker processes if any code has been modified.
+    disable_auto_scaling  Will prevent scalable applications from scaling up
+                          or down according to application load.
+
+You may add additional markers to allow an application developer to control aspects
+of your cartridge.
+
+The sub-directory `.openshift` should contain the sub-directory `action_hooks` which
+will contain code the application developer wishes run during lifecycle changes.
+Examples would be:
+
+    pre_start_`cartridge name`-`software version`
+    post_start_`cartridge name`-`software version`
+    pre_stop_`cartridge name`-`software version`
+    ...
+
+You can obtain a template for the `template` directory from [xxx](http;//git...yyy).
+You will want to down the repo as a zip file and extract the files into your
+cartridge's `template` directory. Further details are in the README.writing_applications.md
+document.
+
+As a cartridge author you do not need to execute the default `action_hooks`.
+OpenShift will call them during lifecycle changes based on the actions given to the
+`control` script. If you wish to add additional hooks, you are expected to document them
+and you will need to run them explicately in your `control` script.
 
 ## Exposing Services / TCP Endpoints
 
@@ -369,6 +435,8 @@ Other candidates for templates are httpd configuration files for
 `includes`, configuring database to store persistent data in the
 OPENSHIFT_DATA_DIR, and setting the application name in the pom.xml file.
 
+`setup` may substitute a version dependent git_template.git repository.
+
 Lock context: `unlocked`
 
 ##### Messaging to OpenShift from cartridge
@@ -446,6 +514,9 @@ The `control` script allows OpenShift or user to control the state of the cartri
 
 The actions that must be supported:
 
+   * `build` is called when building the developers application and by default
+     from the git respository post-receive hook. The application is built in app-root/runtime/repo.
+   * `deploy` is called after a successful `build`
    * `start` start the software your cartridge controls
    * `stop` stop the software your cartridge controls
    * `status` return an 0 exit status if your cartridge code is running.
@@ -490,19 +561,6 @@ restart failed applications. For completeness, `.state` values:
     * `new`         gear has been created, but no application has been installed
     * `started`     application has been commanded to start
     * `stopped`     application has been commanded to stop
-
-## bin/build
-
-##### Synopsis
-
-`build`
-
-##### Description
-
-The `build` script is called during the `git push` to perform builds of the user's new code.
-
-Lock context: `locked`
-
 
 ## Environment Variables
 
