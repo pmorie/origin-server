@@ -14,7 +14,8 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 BuildArch: noarch
 
 %description
-Provides a mock cartridge for use in the V2 Cartridge SDK
+Provides a mock cartridge for use in the V2 Cartridge SDK. Used to integration
+test platform functionality.
 
 
 %prep
@@ -28,9 +29,8 @@ Provides a mock cartridge for use in the V2 Cartridge SDK
 rm -rf %{buildroot}
 mkdir -p %{buildroot}%{cartridgedir}
 mkdir -p %{buildroot}/%{_sysconfdir}/openshift/cartridges
-cp -r {bin,conf,conf.d,env,metadata,opt,versions} %{buildroot}%{cartridgedir}/
-# still need?
-#ln -s %{cartridgedir}/info/configuration/ %{buildroot}/%{_sysconfdir}/openshift/cartridges/%{name}
+cp -r * %{buildroot}%{cartridgedir}/
+ln -s %{cartridgedir}/conf/ %{buildroot}/%{_sysconfdir}/openshift/cartridges/%{name}
 ln -s %{cartridgedir} %{buildroot}/%{frameworkdir}
 
 
@@ -48,10 +48,8 @@ rm -rf %{buildroot}
 %dir %{cartridgedir}/metadata
 %dir %{cartridgedir}/opt
 %dir %{cartridgedir}/versions
-%attr(0750,-,-) %{cartridgedir}/info/hooks/
-%attr(0750,-,-) %{cartridgedir}/info/build/
-%config(noreplace) %{cartridgedir}/info/configuration/
-%attr(0755,-,-) %{cartridgedir}/info/bin/
+%config(noreplace) %{cartridgedir}/conf/
+%attr(0755,-,-) %{cartridgedir}/bin/
 %attr(0755,-,-) %{frameworkdir}
 %{_sysconfdir}/openshift/cartridges/%{name}
 %{cartridgedir}/changelog
