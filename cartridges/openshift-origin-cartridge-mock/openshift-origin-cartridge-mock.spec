@@ -28,10 +28,9 @@ Provides a mock cartridge for use in the V2 Cartridge SDK
 rm -rf %{buildroot}
 mkdir -p %{buildroot}%{cartridgedir}
 mkdir -p %{buildroot}/%{_sysconfdir}/openshift/cartridges
-cp LICENSE %{buildroot}%{cartridgedir}/
-cp COPYRIGHT %{buildroot}%{cartridgedir}/
-cp -r info %{buildroot}%{cartridgedir}/
-ln -s %{cartridgedir}/info/configuration/ %{buildroot}/%{_sysconfdir}/openshift/cartridges/%{name}
+cp -r {bin,conf,conf.d,env,metadata,opt,versions} %{buildroot}%{cartridgedir}/
+# still need?
+#ln -s %{cartridgedir}/info/configuration/ %{buildroot}/%{_sysconfdir}/openshift/cartridges/%{name}
 ln -s %{cartridgedir} %{buildroot}/%{frameworkdir}
 
 
@@ -42,18 +41,23 @@ rm -rf %{buildroot}
 %files
 %defattr(-,root,root,-)
 %dir %{cartridgedir}
-%dir %{cartridgedir}/info
+%dir %{cartridgedir}/bin
+%dir %{cartridgedir}/conf
+%dir %{cartridgedir}/conf.d
+%dir %{cartridgedir}/env
+%dir %{cartridgedir}/metadata
+%dir %{cartridgedir}/opt
+%dir %{cartridgedir}/versions
 %attr(0750,-,-) %{cartridgedir}/info/hooks/
 %attr(0750,-,-) %{cartridgedir}/info/build/
 %config(noreplace) %{cartridgedir}/info/configuration/
 %attr(0755,-,-) %{cartridgedir}/info/bin/
 %attr(0755,-,-) %{frameworkdir}
 %{_sysconfdir}/openshift/cartridges/%{name}
-%{cartridgedir}/info/changelog
-%{cartridgedir}/info/control
-%{cartridgedir}/info/manifest.yml
-%doc %{cartridgedir}/COPYRIGHT
-%doc %{cartridgedir}/LICENSE
+%{cartridgedir}/changelog
+%{cartridgedir}/control
+%{cartridgedir}/metadata/manifest.yml
+%doc %{cartridgedir}/README.md
 
 
 %changelog
