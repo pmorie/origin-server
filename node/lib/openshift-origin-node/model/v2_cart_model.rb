@@ -51,6 +51,12 @@ module OpenShift
       end
     end
 
+    def add_cart(cart)
+
+    end
+
+    def remove_cart(cart)
+
     # Run code block against each cartridge in gear
     #
     # @param  [block]  Code block to process cartridge
