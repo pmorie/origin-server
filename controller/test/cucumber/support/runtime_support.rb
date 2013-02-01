@@ -269,12 +269,14 @@ module OpenShift
 
     # Convenience wrapper to invoke the configure hook.
     def configure()
-      run_hook "configure"
+      gear.container.add_cart(name)
+      # run_hook "deconfigure"
     end
 
     # Convenience wrapper to invoke the deconfigure hook.
     def deconfigure()
-      run_hook "deconfigure"
+      gear.container.remove_cart(name)
+      #run_hook "deconfigure"
     end
 
     # Convenience wrapper to invoke the start hook.

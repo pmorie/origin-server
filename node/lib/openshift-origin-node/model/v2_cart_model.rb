@@ -51,6 +51,7 @@ module OpenShift
     end
 
     def add_cart(cart)
+      OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
 
     end
 
