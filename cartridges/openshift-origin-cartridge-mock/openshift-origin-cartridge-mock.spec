@@ -52,8 +52,6 @@ rm -rf %{buildroot}
 %attr(0755,-,-) %{cartridgedir}/bin/
 %attr(0755,-,-) %{frameworkdir}
 %{_sysconfdir}/openshift/cartridges/%{name}
-%{cartridgedir}/changelog
-%{cartridgedir}/control
 %{cartridgedir}/metadata/manifest.yml
 %doc %{cartridgedir}/README.md
 
