@@ -2,7 +2,7 @@
 %global frameworkdir %{_libexecdir}/openshift/cartridges/mock
 
 Name: openshift-origin-cartridge-mock
-Version: 0.4
+Version: 0.0.1
 Release: 1%{?dist}
 Summary: Mock cartridge for V2 Cartridge SDK
 Group: Development/Languages
