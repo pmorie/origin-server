@@ -36,6 +36,7 @@ module OpenShift
 
     attr_reader :uuid, :application_uuid, :user
 
+
     def initialize(application_uuid, container_uuid, user_uid = nil,
         app_name = nil, container_name = nil, namespace = nil, quota_blocks = nil, quota_files = nil, logger = nil)
       @logger = logger ||= Logger.new(STDOUT)
@@ -64,6 +65,10 @@ module OpenShift
       @cart_model
     end
 
+    # Add cartridge to gear
+    #
+    # context: root -> gear user -> root
+    # @param cart   cartridge name
     def add_cart(cart)
       # TODO: figure out when to mark app as v2 sdk
       OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
@@ -71,21 +76,33 @@ module OpenShift
       cart_model.add_cart(cart)
     end
 
+    # Remove cartridge from gear
+    #
+    # context: root -> gear user -> root
+    # @param cart   cartridge name
     def remove_cart(cart)
       cart_model.remove_cart(cart)
     end
 
-    # Create gear - model/unix_user.rb
+    # create gear
+    #
+    # - model/unix_user.rb
+    # context: root
     def create
       notify_observers(:before_container_create)
       @user.create
       notify_observers(:after_container_create)
     end
 
-    # Destroy gear - model/unix_user.rb
+    # Destroy gear
+    #
+    # - model/unix_user.rb
+    # context: root
+    # @param skip_hooks should destroy call the gear's hooks before destroying the gear
     def destroy(skip_hooks=false)
       notify_observers(:before_container_destroy)
 
+      # FIXME: honor skip_hooks
       # possible mismatch across cart model versions
       output, errout, retcode = cart_model.destroy
 
@@ -95,24 +112,26 @@ module OpenShift
     end
 
     # Public: Fetch application state from gear.
-    # Returns app state as string on Success and 'unknown' on Failure
+    #
+    # context: gear user
+    # @return app state as string on Success and 'unknown' on Failure
     def get_app_state
-      @state.get
+      @state.value
     end
 
     # Public: Sets the application state.
     #
     # new_state - The new state to assign. Must be an ApplicationContainer::State.
     def set_app_state(new_state)
-      @start.set new_state
+      @start.value new_state
     end
 
-    # Public: Sets the app state to "stopped" and causes an immediate forced 
+    # Public: Sets the app state to "stopped" and causes an immediate forced
     # termination of all gear processes.
     #
     # TODO: exception handling
     def force_stop
-      @state.set(ApplicationState::State::STOPPED)
+      @state.value = ApplicationState::State::STOPPED
       UnixUser.kill_procs(@user.uid)
     end
 
@@ -155,7 +174,7 @@ module OpenShift
         start_gear(gear_dir)
       end
 
-      @logger.debug("Completed tidy for gear #{@uuid}")      
+      @logger.debug("Completed tidy for gear #{@uuid}")
     end
 
     def stop_gear(gear_dir)
@@ -254,10 +273,10 @@ module OpenShift
         @logger.info("No Endpoints present in manifest for cart #{cart} in gear #{@uuid}; endpoint creation skipped")
         return
       end
-     
+
       proxy = OpenShift::FrontendProxyServer.new(@logger)
       cart_ip = get_cart_ip(env, cart)
-      
+
       endpoints.each do |endpoint|
         begin
           # Yank the specific info from the endpoint Hash
@@ -384,7 +403,7 @@ module OpenShift
       lookup_order.each do |lookup|
         return env[lookup] if env.has_key?(lookup)
       end
-      
+
       raise %Q{Couldn't determine IP for cartridge #{cart_name}
         Cart namespace: #{cart_ns}
         Lookup order: #{lookup_order}
@@ -423,11 +442,25 @@ module OpenShift
 
     # start gear
     def start
+      @state.value = ApplicationState::State::STARTED
       do_control("start")
     end
 
     # stop gear
     def stop
+      @state.value = ApplicationState::State::STOPPED
+      do_control("stop")
+    end
+
+    # build application
+    def build
+      @state.value = ApplicationState::State::BUILDING
+      do_control("stop")
+    end
+
+    # deploy application
+    def deploy
+      @state.value = ApplicationState::State::DEPLOYING
       do_control("stop")
     end
 
@@ -452,21 +485,45 @@ module OpenShift
     end
 
     # PRIVATE: execute action using each cartridge's control script in gear
-    # FIXME: need to source hooks in command
+    # FIXME: handle stdout, stderr and exceptions
     def do_control(action)
-      gear_env = Utils::Environ.load(File.join(user.home_dir, ".env"))
+      gear_env     = Utils::Environ.load(File.join(user.home_dir, ".env")).
+          merge(Utils::Environ.load("/etc/openshift/env"))
+      action_hooks = File.join(user.home_dir, %w{app-root runtime repo .openshift action_hooks})
+
+      pre_action = File.join(action_hooks, "pre_#{action}")
+      _, _, rc   = Utils.oo_spawn(pre_action,
+                                  :env             => gear_env,
+                                  :unsetenv_others => true,
+                                  :chdir           => user.home_dir)
 
       @cart_model.process_cartridges { |path|
         cartridge_env = Utils::Environ.load(File.join(path, "env")).merge(gear_env)
 
-        control       = Files.join(path, "bin", "control")
-        unless File.executable?(control)
-          raise "Corrupt cartridge: #{control} must exists and be executable"
+        control = Files.join(path, %w{bin control})
+        unless File.executable? control
+          raise "Corrupt cartridge: #{control} must exist and be executable"
         end
 
-        command = control + " " + action
-        Utils::spawn(cartridge_env, command, user.home_dir)
+        cartridge   = File.basename(path)
+        pre_action  = File.join(action_hooks, "pre_#{action}_#{cartridge}")
+        post_action = File.join(action_hooks, "post_#{action}_#{cartridge}")
+
+        command = ''
+        command += "source #{pre_action}; " if File.exist? pre_action
+        command += "#{control} #{action}  "
+        command += "; #{post_action}      " if File.exist? post_action
+        _, _, rc = Utils.oo_spawn(command,
+                                  :env             => cartridge_env,
+                                  :unsetenv_others => true,
+                                  :chdir           => user.home_dir)
       }
+
+      post_action = File.join(action_hooks, "post_#{action}")
+      _, _, rc    = Utils.oo_spawn(post_action,
+                                   :env             => gear_env,
+                                   :unsetenv_others => true,
+                                   :chdir           => user.home_dir)
     end
     # ---------------------------------------------------------------------
   end

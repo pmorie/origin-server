@@ -24,7 +24,9 @@ module OpenShift
       # @param [String] gear_dir       Home directory of the gear
       # @return [Hash<String,String>]  hash[Environment Variable] = Value
       def self.for_gear(gear_dir)
-        load(File.join(gear_dir, '*/env')).merge(load(File.join(gear_dir, '.env')))
+        load(File.join(gear_dir, '*/env')).
+            merge(load(File.join(gear_dir, '.env'))).
+            merge(load("/etc/openshift/env"))
       end
 
       # Read a Gear's + n number cartridge environment variables into a environ(7) hash

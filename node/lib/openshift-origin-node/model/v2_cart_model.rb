@@ -25,7 +25,7 @@ module OpenShift
         begin
           # Execute the hook in the context of the gear user
           @logger.debug("Executing cart teardown hook #{teardown_hook} in gear #{@uuid} as user #{@user.uid}:#{@user.gid}")
-          run_as(@user.uid, @user.gid, teardown_hook, gear_dir, false, 0, timeout)
+          run_as(@user.uid, @user.gid, teardown_hook, gear_dir, false, 0, @timeout)
         rescue OpenShift::Utils::ShellExecutionException => e
           @logger.warn("Cartridge tidy operation failed on gear #{@uuid} for cart #{gear_dir}: #{e.message} (rc=#{e.rc})")
         end
@@ -44,7 +44,7 @@ module OpenShift
         begin
           # Execute the hook in the context of the gear user
           @logger.debug("Executing cart tidy script #{tidy_script} in gear #{@uuid} as user #{@user.uid}:#{@user.gid}")
-          run_as(@user.uid, @user.gid, tidy_script, gear_dir, false, 0, timeout)
+          run_as(@user.uid, @user.gid, tidy_script, gear_dir, false, 0, @timeout)
         rescue OpenShift::Utils::ShellExecutionException => e
           @logger.warn("Cartridge tidy operation failed on gear #{@uuid} for cart #{gear_dir}: #{e.message} (rc=#{e.rc})")
         end
@@ -69,4 +69,5 @@ module OpenShift
       end
     end
   end
-end
+  end
+  end
