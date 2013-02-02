@@ -11,9 +11,8 @@ module OpenShift
       @timeout = 30
     end
 
-    def get_manifest(cart)
-      manifest_path = File.join(@config.get('CARTRIDGE_BASE_PATH'), cart, 'metadata', 'manifest.yml')
-      YAML.load_file(manifest_path)
+    def get_cart_manifest_path(cart_name)
+      File.join(@config.get('CARTRIDGE_BASE_PATH'), cart_name, 'metadata', 'manifest.yml')
     end
 
     def destroy
@@ -57,6 +56,8 @@ module OpenShift
 
     def remove_cart(cart)
 
+    end
+
     # Run code block against each cartridge in gear
     #
     # @param  [block]  Code block to process cartridge
@@ -69,5 +70,4 @@ module OpenShift
       end
     end
   end
-  end
-  end
+end

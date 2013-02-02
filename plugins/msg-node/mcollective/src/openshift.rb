@@ -230,7 +230,7 @@ module MCollective
         output = ""
         begin
           container = OpenShift::ApplicationContainer.new(app_uuid, container_uuid)
-          output = container.get_app_state()
+          output = container.state.value
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace

@@ -12,9 +12,8 @@ module OpenShift
       @logger = logger ||= Logger.new(STDOUT)
     end
 
-    def get_manifest(cart)
-      manifest_path = File.join(@config.get('CARTRIDGE_BASE_PATH'), cart, 'info', 'manifest.yml')
-      YAML.load_file(manifest_path)
+    def get_cart_manifest_path(cart_name)
+      File.join(@config.get('CARTRIDGE_BASE_PATH'), cart_name, 'info', 'manifest.yml')
     end
 
     def destroy(skip_hooks = false)

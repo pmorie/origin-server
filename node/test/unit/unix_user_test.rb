@@ -19,6 +19,7 @@
 #
 require 'openshift-origin-node/model/unix_user'
 require 'test/unit'
+require 'mocha'
 
 # Run unit test manually
 # ruby -Iopenshift/node/lib/:openshift/common/lib/ openshift/node/test/unit/unix_user_test.rb 
@@ -39,6 +40,10 @@ class TestUnixUserModel < Test::Unit::TestCase
     @gear_name = @app_name
     @namespace = 'jwh201204301647'
     @verbose = false
+
+    @config = mock('OpenShift::Config')
+    @config.stubs(:get).with("GEAR_BASE_DIR").returns("/tmp")
+    OpenShift::Config.stubs(:new).returns(@config)
   end
 
   def test_initialize
@@ -59,6 +64,24 @@ class TestUnixUserModel < Test::Unit::TestCase
     assert_directory?("/tmp/homedir/.tmp")
     assert_directory?("/tmp/homedir/.env")
     assert_directory?("/tmp/homedir/.sandbox")
+  end
+
+  # Tests a variety of UID/host ID to IP address conversions.
+  #
+  # TODO: Is there a way to do this algorithmically?
+  def test_get_ip_addr_success
+    scenarios = [
+      [501, 1, "127.0.250.129"],
+      [501, 10, "127.0.250.138"],
+      [501, 20, "127.0.250.148"],
+      [501, 100, "127.0.250.228"],
+      [540, 1, "127.1.14.1"],
+      [560, 7, "127.1.24.7"]
+    ]
+
+    scenarios.each do |s|
+      assert_equal OpenShift::UnixUser.get_ip_addr(s[0], s[1]), s[2]
+    end
   end
 
 # This tests cannot be run because expected polyinstantiation of /tmp causes system /tmp to be chmod 760.
