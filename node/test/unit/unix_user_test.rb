@@ -43,6 +43,7 @@ class TestUnixUserModel < Test::Unit::TestCase
 
     @config = mock('OpenShift::Config')
     @config.stubs(:get).with("GEAR_BASE_DIR").returns("/tmp")
+    @config.stubs(:get).with("CLOUD_DOMAIN").returns("rhcloud.com")
     OpenShift::Config.stubs(:new).returns(@config)
   end
 
