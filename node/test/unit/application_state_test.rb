@@ -59,7 +59,7 @@ module OpenShift
       assert_equal State::STARTED, state.value
 
       stats = File.stat(File.join(@runtime_dir, ".state"))
-      assert_equal @uid, status.uid
+      assert_equal @uid, stats.uid
     end
   end
 end

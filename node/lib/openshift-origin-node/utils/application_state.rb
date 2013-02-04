@@ -62,7 +62,7 @@ module OpenShift
         }
 
         parent = File.dirname(@state_file)
-        OpenShift::Utils.spawn(
+        OpenShift::Utils.oo_spawn(
             "chown --reference #{parent} #@state_file;
              chcon --reference #{parent} #@state_file"
         )

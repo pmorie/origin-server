@@ -49,7 +49,7 @@ module OpenShift
 
     def test_timeout
       assert_raises OpenShift::Utils::ShellExecutionException do
-        Utils.spawn("sleep 15",
+        Utils.oo_spawn("sleep 15",
                     :timeout => 1)
       end
     end

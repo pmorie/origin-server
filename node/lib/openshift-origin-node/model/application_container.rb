@@ -19,6 +19,7 @@ require 'openshift-origin-node/model/frontend_proxy'
 require 'openshift-origin-node/model/unix_user'
 require 'openshift-origin-node/model/v1_cart_model'
 require 'openshift-origin-node/model/v2_cart_model'
+require 'openshift-origin-node/model/cartridge'
 require 'openshift-origin-node/utils/shell_exec'
 require 'openshift-origin-node/utils/application_state'
 require 'openshift-origin-node/utils/environ'
@@ -59,10 +60,25 @@ module OpenShift
 
     def cart_model
       unless @cart_model
-        @cart_model = (OpenShift::Utils::Sdk.is_new_sdk_app(@user.homedir)) ? V2CartridgeModel.new(@config, @user) : V1CartridgeModel.new(@config, @user)
+        @cart_model = (OpenShift::Utils::Sdk.is_new_sdk_app(@user.homedir)) ? 
+          V2CartridgeModel.new(@config, @user) : V1CartridgeModel.new(@config, @user)
       end
 
       @cart_model
+    end
+
+    # Loads a cartridge from manifest for the given name.
+    #
+    # TODO: Caching?
+    def get_cartridge(cart_name)
+      begin
+        manifest_path = cart_model.get_cart_manifest_path(cart_name)
+        manifest = YAML.load_file(manifest_path)
+        return OpenShift::Runtime::Cartridge.new(manifest)
+      rescue => e
+        @logger.error(e.backtrace)
+        raise "Failed to load cart manifest from #{manifest_path} for cart #{cart_name} in gear #{@uuid}: #{e.message}"
+      end
     end
 
     # Add cartridge to gear
@@ -111,21 +127,6 @@ module OpenShift
       return output, errout, retcode
     end
 
-    # Public: Fetch application state from gear.
-    #
-    # context: gear user
-    # @return app state as string on Success and 'unknown' on Failure
-    def get_app_state
-      @state.value
-    end
-
-    # Public: Sets the application state.
-    #
-    # new_state - The new state to assign. Must be an ApplicationContainer::State.
-    def set_app_state(new_state)
-      @start.value new_state
-    end
-
     # Public: Sets the app state to "stopped" and causes an immediate forced
     # termination of all gear processes.
     #
@@ -135,6 +136,128 @@ module OpenShift
       UnixUser.kill_procs(@user.uid)
     end
 
+    # Allocates and assigns private IP/port entries for a cartridge
+    # based on endpoint metadata for the cartridge.
+    #
+    # Returns nil on success, or raises an exception if any errors occur: all errors
+    # here are considered fatal.
+    def create_private_endpoints(cart_name)
+      cart = get_cartridge(cart_name)
+
+      allocated_ips = {}
+
+      cart.endpoints.each do |endpoint|
+        # Resuse previously allocated IPs of the same name. When recycling
+        # an IP, double-check that it's not bound to the target port, and
+        # bail if it's unexpectedly bound.
+        unless allocated_ips.has_key?(endpoint.private_ip_name)
+          # Allocate a new IP for the endpoint
+          private_ip = find_open_ip(endpoint.private_port)
+
+          if private_ip == nil
+            raise "No IP was available to create endpoint for cart #{cart.name} in gear #{@uuid}: "\
+              "#{endpoint.private_ip_name}(#{endpoint.private_port})"
+          end
+
+          @user.add_env_var(endpoint.private_ip_name, private_ip)
+
+          allocated_ips[endpoint.private_ip_name] = private_ip
+        end
+
+        private_ip = allocated_ips[endpoint.private_ip_name]
+
+        if address_bound?(private_ip, endpoint.private_port)
+          raise "Couldn't create private endpoint #{endpoint.private_ip_name}(#{endpoint.private_port}) "\
+            "because an existing process was bound to the IP (private_ip)"
+        end
+
+        @user.add_env_var(endpoint.private_port_name, endpoint.private_port)
+        
+        @logger.info("Created private endpoint for cart #{cart.name} in gear #{@uuid}: "\
+          "[#{endpoint.private_ip_name}=#{private_ip}, #{endpoint.private_port_name}=#{endpoint.private_port}]")
+      end
+    end
+
+    # TODO: How should this be implemented?
+    def delete_private_endpoints(cart_name)
+      raise "Not implemented"
+    end
+
+    # Creates public endpoints for the given cart. Public proxy mappings are created via
+    # the FrontendProxyServer, and the resulting mapped ports are written to environment
+    # variables with names based on the cart manifest endpoint entries.
+    #
+    # Returns nil on success, or raises an exception if any errors occur: all errors here
+    # are considered fatal.
+    def create_public_endpoints(cart_name)
+      env = Utils::Environ::for_gear(@user.homedir)
+      cart = get_cartridge(cart_name)
+
+      proxy = OpenShift::FrontendProxyServer.new(@logger)
+
+      # TODO: better error handling
+      cart.public_endpoints.each do |endpoint|
+        # Load the private IP from the gear
+        private_ip = env[endpoint.private_ip_name]
+
+        if private_ip == nil
+          raise "Missing private IP #{endpoint.private_ip_name} for cart #{cart.name} in gear #{@uuid}, "\
+            "required to create public endpoint #{endpoint.public_port_name}"
+        end
+
+        # Attempt the actual proxy mapping assignment
+        public_port = proxy.add(@user.uid, private_ip, endpoint.private_port)
+
+        @user.add_env_var(endpoint.public_port_name, public_port)
+
+        @logger.info("Created public endpoint for cart #{cart.name} in gear #{@uuid}: "\
+          "[#{endpoint.public_port_name}=#{public_port}]")
+      end
+    end
+
+    # Deletes all public endpoints for the given cart. Public port mappings are
+    # looked up and deleted using the FrontendProxyServer, and all corresponding
+    # environment variables are deleted from the gear.
+    #
+    # Returns nil on success. Failed public port delete operations are logged
+    # and skipped.
+    def delete_public_endpoints(cart_name)
+      env = Utils::Environ::for_gear(@user.homedir)
+      cart = get_cartridge(cart_name)
+
+      proxy = OpenShift::FrontendProxyServer.new(@logger)
+
+      public_ports = []
+      public_port_vars = []
+
+      cart.public_endpoints.each do |endpoint|
+        # Load the private IP from the gear
+        private_ip = env[endpoint.private_ip_name]
+
+        public_port_vars << endpoint.public_port_name
+
+        public_port = proxy.find_mapped_proxy_port(@user.uid, private_ip, endpoint.private_port)
+
+        public_ports << public_port unless public_port == nil
+      end
+
+      begin
+        # Remove the proxy entries
+        rc = proxy.delete_all(public_ports, true)
+        @logger.info("Deleted all public endpoints for cart #{cart.name} in gear #{@uuid}\n"\
+          "Endpoints: #{public_port_vars}\n"\
+          "Public ports: #{public_ports}")
+      rescue => e
+        @logger.warn(%Q{Couldn't delete all public endpoints for cart #{cart.name} in gear #{@uuid}: #{e.message}
+          Endpoints: #{public_port_vars}
+          Public ports: #{public_ports}
+          #{e.backtrace}
+          })
+      end
+
+      # Clean up the environment variables
+      public_port_vars.each { |var| @user.remove_env_var(var) }
+    end
 
     # Public: Cleans up the gear, providing any installed
     # cartridges with the opportunity to perform their own
@@ -152,7 +275,7 @@ module OpenShift
     def tidy
       @logger.debug("Starting tidy on gear #{@uuid}")
 
-      env = load_env
+      env = Utils::Environ::for_gear(@user.homedir)
       gear_dir = env['OPENSHIFT_HOMEDIR']
       app_name = env['OPENSHIFT_APP_NAME']
 
@@ -242,199 +365,65 @@ module OpenShift
       end
     end
 
-    # Creates an endpoint for the given cart within a gear. The flow is:
+    # Finds the next IP address available for binding of the given port for
+    # the current gear user. The IP is assumed to be available only if:
     #
-    # 1. Extract the Endpoint metadata from the cart manifest.
-    # 2. For each endpoint:
-    #   a. Compute the internal name for the endpoint (OPENSHIFT_{CART_NS}_{ENDPOINT_NAME}).
-    #   b. Attempt to create a proxy mapping for the endpoint via FrontendProxyServer.
-    #   c. Create an environment variable for the endpoint name with a value of
-    #      the mapped proxy port assigned from (b).
+    #   1. The IP is not already associated with an existing endpoint defined
+    #      by any cartridge within the gear, and
+    #   2. The IP/port is not already bound to a process according to lsof.
     #
-    # Returns nil on success, and raises an exception if the manifest can't be parsed
-    # or if any individual endpoint creation fails for any reason.
-    def create_endpoints(cart)
-      env = load_env
+    # Returns a string IP address in dotted-quad notation if one is available
+    # for the given port, or returns nil if IP is available.
+    def find_open_ip(port)
+      allocated_ips = get_allocated_private_ips
 
-      # Load the manifest for the cartridge
-      begin
-        manifest = get_cart_manifest(cart)
-      rescue => e
-        @logger.error(%Q{Failed to parse manifest for cart #{cart} in gear #{@uuid}: #{e.message}
-          #{e.backtrace}
-          })
-        raise "Couldn't create endpoints for cart #{cart} in gear #{@uuid}"
+      open_ip = nil
+
+      for host_ip in 1..127
+        candidate_ip = UnixUser.get_ip_addr(@user.uid.to_i, host_ip)
+
+        # Skip the IP if it's already assigned to an endpoint
+        next if allocated_ips.include?(candidate_ip)
+
+        # Check to ensure the IP/port is not currently bound to another process
+        next if address_bound?(candidate_ip, port)
+        
+        open_ip = candidate_ip
+        break
       end
 
-      endpoints = manifest["Endpoints"]
-
-      # Nothing to do if no endpoints are defined in the manifest
-      if endpoints == nil
-        @logger.info("No Endpoints present in manifest for cart #{cart} in gear #{@uuid}; endpoint creation skipped")
-        return
-      end
-
-      proxy = OpenShift::FrontendProxyServer.new(@logger)
-      cart_ip = get_cart_ip(env, cart)
-
-      endpoints.each do |endpoint|
-        begin
-          # Yank the specific info from the endpoint Hash
-          name = endpoint.flatten[0]
-          port = endpoint.flatten[1]
-
-          # Compute the endpoint name
-          cart_ns = self.class.cart_name_to_namespace(cart)
-          endpoint_name = "OPENSHIFT_#{cart_ns}_#{name}"
-
-          # Attempt the actual proxy mapping assignment
-          proxy_port = proxy.add(@user.uid, cart_ip, port)
-
-          # Create an env var for the endpoint
-          @user.add_env_var(endpoint_name, proxy_port)
-
-          @logger.info("Created endpoint #{endpoint_name}=#{cart_ip}:#{proxy_port} for cart #{cart} on gear #{@uuid}")
-        rescue => e
-          @logger.error(%Q{Failed to create endpoint #{endpoint} for cart #{cart} in gear #{@uuid}: #{e.message}
-            #{e.backtrace}
-            })
-          raise "Couldn't create endpoint #{endpoint} for cart #{cart} in gear #{@uuid}"
-        end
-      end
+      return open_ip
     end
 
-    # Deletes all endpoints for the given cart based on the cartridge manifest
-    # Endpoint entries and cleans up the related environment variables from
-    # the gear.
-    #
-    # Returns nil on success, and raises an exception if the manifest can't be parsed.
-    # Any failed deletes will be logged and skipped.
-    def delete_endpoints(cart)
-      env = load_env
+    # Returns true if the given IP and port are currently unbound
+    # according to lsof, otherwise false.
+    def address_unbound?(ip, port)
+      out, err, rc = shellCmd("/usr/sbin/lsof -i @#{ip}:#{port}")
+      return rc != 0
+    end
 
-      # Load the manifest for the cartridge
-      begin
-        manifest = get_cart_manifest(cart)
-      rescue => e
-        @logger.error(%Q{Failed to parse manifest for cart #{cart} in gear #{@uuid}: #{e.message}
-          #{e.backtrace}
-          })
-        raise "Couldn't delete endpoints for cart #{cart} in gear #{@uuid}"
-      end
+    # Returns an array containing all currently allocated endpoint private
+    # IP addresses assigned to carts within the current gear, or an empty
+    # array if none are currently defined.
+    def get_allocated_private_ips
+      env = Utils::Environ::for_gear(@user.homedir)
 
-      endpoints = manifest["Endpoints"]
+      allocated_ips = []
 
-      # Nothing to do if no endpoints are defined in the manifest
-      if endpoints == nil
-        @logger.info("No Endpoints present in manifest for cart #{cart} in gear #{@uuid}; endpoint deletion skipped")
-        return
-      end
+      # Collect all existing endpoint IP allocations
+      @cart_model.process_cartridges do |cart_path|
+        cart_name = File.basename(cart_path)
+        cart = get_cartridge(cart_name)
 
-      proxy = OpenShift::FrontendProxyServer.new(@logger)
-      cart_ip = get_cart_ip(env, cart)
-
-      proxy_ports = []
-      endpoint_vars = []
-
-      # Gather endpoint metadata
-      endpoints.each do |endpoint|
-        name = endpoint.flatten[0]
-        port = endpoint.flatten[1]
-
-        # Compute the endpoint name
-        cart_ns = self.class.cart_name_to_namespace(cart)
-        endpoint_name = "OPENSHIFT_#{cart_ns}_#{name}"
-
-        endpoint_vars << endpoint_name
-
-        proxy_port = proxy.find_mapped_proxy_port(@user.uid, cart_ip, port)
-
-        if proxy_port != nil
-          proxy_ports << proxy_port
+        cart.endpoints.each do |endpoint|
+          # TODO: If the private IP variable exists but the value isn't in
+          # the environment, what should happen?
+          ip = env[endpoint.private_ip_name]
+          allocated_ips << ip unless ip == nil
         end
       end
 
-      begin
-        # Remove the proxy entries
-        rc = proxy.delete_all(proxy_ports, true)
-        @logger.info(%Q{Deleted #{endpoints.length} endpoints for cart #{cart} in gear #{@uuid}
-          Endpoints: #{endpoints}
-          Proxy ports: #{proxy_ports}
-          })
-      rescue => e
-        @logger.warn(%Q{Couldn't delete all endpoints for cart #{cart} in gear #{@uuid}: #{e.message}
-          Endpoints: #{endpoints}
-          Proxy ports: #{proxy_ports}
-          #{e.backtrace}
-          })
-      end
-
-      # Clean up the environment variables
-      endpoint_vars.each { |var| @user.remove_env_var(var) }
-    end
-
-    # Resolves, loads, and returns the given cartridge manifest as a YAML object.
-    #
-    # Raises an exception on error.
-    def get_cart_manifest(cart)
-      cart_model.get_manifest(cart)
-      # replaces:
-      # manifest_path = File.join(@config.get("CARTRIDGE_BASE_PATH"), cart, "info", "manifest.yml")
-      # return YAML.load_file(manifest_path)
-    end
-
-    # Compatibility function to resolve a cartridge's IP taking into account the
-    # fact that there are two different naming conventions in use from when there
-    # was a hard distinction between database and non-database cartridges.
-    #
-    # The cart IP will be resolved by using a lookup order against the provided
-    # environment hash. The order of precedence from most to least preferred is:
-    #
-    #   1. OPENSHIFT_{CART_NS}_IP
-    #   2. OPENSHIFT_{CART_NS}_DB_HOST
-    #
-    # Returns the IP for the given cart/environment and raises an exception if
-    # no preferred key is present in the hash.
-    def get_cart_ip(env, cart_name)
-      cart_ns = self.class.cart_name_to_namespace(cart_name)
-
-      lookup_order = ["OPENSHIFT_#{cart_ns}_IP", "OPENSHIFT_#{cart_ns}_DB_HOST"]
-
-      lookup_order.each do |lookup|
-        return env[lookup] if env.has_key?(lookup)
-      end
-
-      raise %Q{Couldn't determine IP for cartridge #{cart_name}
-        Cart namespace: #{cart_ns}
-        Lookup order: #{lookup_order}
-        Env: #{env}
-      }
-    end
-
-    # Public: Load a gears environment variables into the environment
-    #
-    # Examples
-    #
-    #   load_env
-    #   # => {"OPENSHIFT_APP_NAME"=>"myapp"}
-    #
-    # Returns env Array
-    def load_env
-      Utils::Environ::for_gear(user.homedir)
-    end
-
-    # Converts a cartridge name to a cartridge namespace.
-    #
-    # Examples:
-    #
-    #     cart_name_to_namespace('jbossas-7')
-    #     => "JBOSSAS"
-    #     cart_name_to_namespace('jenkins-client-1.4')
-    #     => "JENKINSCLIENT"
-    #
-    # Returns the cartridge namespace as a String.
-    def self.cart_name_to_namespace(cart)
-      return `echo #{cart} | sed 's/-//g' | sed 's/[^a-zA-Z_]*$//g' | tr '[a-z]' '[A-Z]'`.chomp
+      allocated_ips
     end
 
     # ---------------------------------------------------------------------
