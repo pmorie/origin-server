@@ -21,7 +21,7 @@ module OpenShift
         FileUtils.touch(File.join(gear_home, '.env', MARKER))
       end
 
-      def v1_cartridges
+      def self.v1_cartridges
         V1_CARTRIDGES
       end
     end

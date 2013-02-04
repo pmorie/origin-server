@@ -821,7 +821,7 @@ module MCollective
           pj, pid, sout, serr = reap_args
           reap_output(pj, pid, sout, serr)
         }
-        Log.instance.info("execute_parallel_action call - 10 #{joblist}")
+        Log.instance.info("execute_parallel_action call - #{joblist}")
         reply[:output] = joblist
         reply[:exitcode] = 0
       end
