@@ -35,7 +35,7 @@ module OpenShift
     include OpenShift::Utils::ShellExec
     include ActiveModel::Observing
 
-    attr_reader :uuid, :application_uuid, :user
+    attr_reader :uuid, :application_uuid, :user, :state
 
 
     def initialize(application_uuid, container_uuid, user_uid = nil,
@@ -86,9 +86,6 @@ module OpenShift
     # context: root -> gear user -> root
     # @param cart   cartridge name
     def add_cart(cart)
-      # TODO: figure out when to mark app as v2 sdk
-      OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
-
       cart_model.add_cart(cart)
     end
 
@@ -301,6 +298,7 @@ module OpenShift
     end
 
     def stop_gear(gear_dir)
+      # TODO: remove shell command
       begin
         # Stop the gear. If this fails, consider the tidy a failure.
         out, err, rc = shellCmd("/usr/sbin/oo-admin-ctl-gears stopgear #{@user.uuid}", gear_dir, false, 0)
@@ -316,6 +314,7 @@ module OpenShift
     end
 
     def start_gear(gear_dir)
+      # TODO: remove shell command
       begin
         # Start the gear, and if that fails raise an exception, as the app is now
         # in a bad state.

@@ -1,10 +1,13 @@
 require 'rubygems'
+require 'open4'
 require 'openshift-origin-node/model/unix_user'
 require 'openshift-origin-node/utils/shell_exec'
 
 module OpenShift
   class V1CartridgeModel
     include OpenShift::Utils::ShellExec
+
+    attr_reader :logger
 
     def initialize(config, user, logger = nil)
       @config = config
@@ -86,12 +89,67 @@ module OpenShift
     end
 
     def add_cart(cart)
-      # TODO: type to raise?
-      raise 'add_cart is not implemented for V1 cartridge model'
+      handle_cartridge_action(cart, 'configure', "#{@user.app_name} #{@user.namespace} #{@user.container_uuid}")
     end
 
     def remove_cart(cart)
-      raise 'remove_cart is not implements for V1 cartridge model'
+      handle_cartridge_action(cart, 'deconfigure', "#{@user.app_name} #{@user.namespace} #{@user.container_uuid}")
     end
+
+    #------------------------------------
+    # XXX: below code ripped from mcollective agent
+
+    # pre-refactor, V1 cartridges were added by the mcollective agent by 
+    # calling the configure hook directly.
+    def handle_cartridge_action(cartridge, action, args)
+      exitcode = 0
+      output = ""
+
+      if File.exists? "/usr/libexec/openshift/cartridges/#{cartridge}/info/hooks/#{action}"
+        cart_cmd = "/usr/bin/runcon -l s0-s0:c0.c1023 /usr/libexec/openshift/cartridges/#{cartridge}/info/hooks/#{action} #{args} 2>&1"
+        logger.info("handle_cartridge_action executing #{cart_cmd}")
+        pid, stdin, stdout, stderr = Open4::popen4ext(true, cart_cmd)
+      elsif File.exists? "/usr/libexec/openshift/cartridges/embedded/#{cartridge}/info/hooks/#{action}"
+        cart_cmd = "/usr/bin/runcon -l s0-s0:c0.c1023 /usr/libexec/openshift/cartridges/embedded/#{cartridge}/info/hooks/#{action} #{args} 2>&1"
+        logger.info("handle_cartridge_action executing #{cart_cmd}")
+        pid, stdin, stdout, stderr = Open4::popen4ext(true, cart_cmd)
+      else
+        exitcode = 127
+        output = "ERROR: action '#{action}' not found."
+      end
+      exitcode, output = complete_process_gracefully(pid, stdin, stdout) if exitcode == 0
+
+      #XXX: account for run_hook vs. run_hook_output in test.
+      return exitcode
+    end
+
+    def complete_process_gracefully(pid, stdin, stdout)
+      stdin.close
+      ignored, status = Process::waitpid2 pid
+      exitcode = status.exitstatus
+      # Do this to avoid cartridges that might hold open stdout
+      output = ""
+      begin
+        Timeout::timeout(5) do
+          while (line = stdout.gets)
+            output << line
+          end
+        end
+      rescue Timeout::Error
+        logger.info("WARNING: stdout read timed out")
+      end
+
+      if exitcode == 0
+        logger.info("(#{exitcode})\n------\n#{cleanpwd(output)}\n------)")
+      else
+        logger.info("ERROR: (#{exitcode})\n------\n#{cleanpwd(output)}\n------)")
+      end
+      return exitcode, output
+    end
+
+    def cleanpwd(arg)
+      arg.gsub(/(passwo?r?d\s*[:=]+\s*)\S+/i, '\\1[HIDDEN]').gsub(/(usern?a?m?e?\s*[:=]+\s*)\S+/i,'\\1[HIDDEN]')
+    end
+
   end
 end
