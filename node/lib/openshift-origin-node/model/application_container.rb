@@ -58,6 +58,25 @@ module OpenShift
       @uuid
     end
 
+    #-----------------------------------
+    # Cart Model:
+    # 
+    # There are two use cases for determining the cartridge
+    # model to use:
+    # 
+    # 1. ApplicationContainer is created for a new application which
+    #    contains no cartridges and the model must be inferred from the name
+    #    of the cartridge being added
+    def establish_cart_model(cart)
+      unless @cart_model
+        @cart_model = (OpenShift::Utils::Sdk.v1_cartridges.include?(cart)) ? 
+          V1CartridgeModel.new(@config, @user) : V2CartridgeModel.new(@config, @user)
+      end
+    end
+
+    # 2. ApplicationContainer is created for an existing app which
+    #    already has a cartridge and thus an appropriate cart model
+    #    to use.
     def cart_model
       unless @cart_model
         @cart_model = (OpenShift::Utils::Sdk.is_new_sdk_app(@user.homedir)) ? 
@@ -81,11 +100,18 @@ module OpenShift
       end
     end
 
-    # Add cartridge to gear
+    # Add cartridge to gear.  This method establishes the cartridge model
+    # to use, but does not mark the application.  Marking the application
+    # is the responsibility of the cart model.
+    #
+    # This method does not enforce constraints on whether the cartridge 
+    # being added is compatible with other installed cartridges.  That 
+    # is the responsibility of the broker.
     #
     # context: root -> gear user -> root
     # @param cart   cartridge name
     def add_cart(cart)
+      establish_cart_model(cart)
       cart_model.add_cart(cart)
     end
 
@@ -115,9 +141,8 @@ module OpenShift
     def destroy(skip_hooks=false)
       notify_observers(:before_container_destroy)
 
-      # FIXME: honor skip_hooks
       # possible mismatch across cart model versions
-      output, errout, retcode = cart_model.destroy
+      output, errout, retcode = cart_model.destroy(skip_hooks)
 
       notify_observers(:after_container_destroy)
 

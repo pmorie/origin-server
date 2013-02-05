@@ -54,7 +54,7 @@ module OpenShift
         }
       end
 
-      # join current process to openshfit cgoups if possible
+      # join current process to openshift cgoups if possible
       #
       # cgclassify -g cpu,cpuacct,memory,net_cls,freezer:/openshift/510fe9db6b61de4618000005 30608
       def join_cgroups
