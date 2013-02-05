@@ -16,7 +16,8 @@ module OpenShift
       File.join(@config.get('CARTRIDGE_BASE_PATH'), cart_name, 'metadata', 'manifest.yml')
     end
 
-    def destroy
+    def destroy(skip_hooks = false)
+      # TODO: honor skip_hooks
       Dir.entries(@user.homedir).each do |gear_subdir|
         teardown_hook = File.join(@config.get('CARTRIDGE_BASE_PATH'), cart, 'bin', 'teardown')
 

@@ -115,9 +115,8 @@ module OpenShift
     def destroy(skip_hooks=false)
       notify_observers(:before_container_destroy)
 
-      # FIXME: honor skip_hooks
       # possible mismatch across cart model versions
-      output, errout, retcode = cart_model.destroy
+      output, errout, retcode = cart_model.destroy(skip_hooks)
 
       notify_observers(:after_container_destroy)
 
