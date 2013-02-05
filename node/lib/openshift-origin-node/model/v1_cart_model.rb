@@ -9,9 +9,10 @@ module OpenShift
 
     attr_reader :logger
 
-    def initialize(config, user, logger = nil)
+    def initialize(config, user, gear, logger = nil)
       @config = config
       @user = user
+      @gear = gear
       @logger = logger ||= Logger.new(STDOUT)
     end
 

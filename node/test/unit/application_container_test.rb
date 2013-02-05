@@ -64,25 +64,8 @@ class ApplicationContainerTest < Test::Unit::TestCase
         @app_name, @gear_uuid, @namespace, nil, nil, nil)   
   end
 
-  def test_private_endpoint_create_php
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
-
-    cart = "openshift-origin-cartridge-php-5.3"
-
-    ip = "127.0.250.255"
-
-    @container.expects(:find_open_ip).with(8080).returns(ip).once
-
-    @container.expects(:address_bound?).returns(false).once
-
-    @container.user.expects(:add_env_var).with("OPENSHIFT_PHP_IP", ip).once
-    @container.user.expects(:add_env_var).with("OPENSHIFT_PHP_PORT", 8080).once
-    
-    @container.create_private_endpoints(cart)
-  end
-
   def test_public_endpoint_create_php
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
+    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, @container.user, @container))
 
     cart = "openshift-origin-cartridge-php-5.3"
 
@@ -99,7 +82,7 @@ class ApplicationContainerTest < Test::Unit::TestCase
   end
 
   def test_public_endpoint_create_jbossas7
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
+    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, @container.user, @container))
 
     cart = "openshift-origin-cartridge-jbossas-7"
     
@@ -119,29 +102,8 @@ class ApplicationContainerTest < Test::Unit::TestCase
     @container.create_public_endpoints(cart)
   end
 
-  def test_private_endpoint_create_jbossas7
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
-
-    cart = "openshift-origin-cartridge-jbossas-7"
-
-    ip = "127.0.250.255"
-
-    @container.expects(:find_open_ip).with(8080).returns(ip).once
-
-    @container.expects(:address_bound?).returns(false).times(5)
-
-    @container.user.expects(:add_env_var).with("OPENSHIFT_JBOSSAS_IP", ip).once
-    @container.user.expects(:add_env_var).with("OPENSHIFT_JBOSSAS_PORT", 8080).once
-    @container.user.expects(:add_env_var).with("OPENSHIFT_JBOSSAS_CLUSTER_PORT", 7600).once
-    @container.user.expects(:add_env_var).with("OPENSHIFT_JBOSSAS_MESSAGING_PORT", 5445).once
-    @container.user.expects(:add_env_var).with("OPENSHIFT_JBOSSAS_MESSAGING_THROUGHPUT_PORT", 5455).once
-    @container.user.expects(:add_env_var).with("OPENSHIFT_JBOSSAS_REMOTING_PORT", 4447).once
-    
-    @container.create_private_endpoints(cart)
-  end
-
   def test_endpoint_delete_jbossas7
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
+    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, @container.user, @container))
 
     cart = "openshift-origin-cartridge-jbossas-7"
     
@@ -165,7 +127,7 @@ class ApplicationContainerTest < Test::Unit::TestCase
   end
 
   def test_tidy_success
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
+    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, @container.user, @container))
 
     OpenShift::Utils::Environ.stubs(:for_gear).returns(
         {'OPENSHIFT_HOMEDIR' => '/foo', 'OPENSHIFT_APP_NAME' => 'app_name' })
@@ -182,7 +144,7 @@ class ApplicationContainerTest < Test::Unit::TestCase
   end
 
   def test_tidy_stop_gear_fails
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
+    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, @container.user, @container))
 
     OpenShift::Utils::Environ.stubs(:for_gear).returns(
         {'OPENSHIFT_HOMEDIR' => '/foo', 'OPENSHIFT_APP_NAME' => 'app_name' })
@@ -201,7 +163,7 @@ class ApplicationContainerTest < Test::Unit::TestCase
   end
 
   def test_tidy_gear_level_tidy_fails
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
+    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, @container.user, @container))
 
     OpenShift::Utils::Environ.stubs(:for_gear).returns(
         {'OPENSHIFT_HOMEDIR' => '/foo', 'OPENSHIFT_APP_NAME' => 'app_name' })
@@ -212,59 +174,5 @@ class ApplicationContainerTest < Test::Unit::TestCase
     @container.expects(:start_gear).once
 
     @container.tidy
-  end
-
-  # Verifies that an IP can be allocated for a simple port binding request
-  # where no other IPs are allocated to any carts in a gear.
-  def test_find_open_ip_success
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
-
-    @container.stubs(:get_allocated_private_ips).returns([])
-    @container.stubs(:address_bound?).returns(false).once
-
-    assert_equal @container.find_open_ip(8080), "127.0.250.129"
-  end
-
-  # Ensures that a previously allocated IP within the gear won't be recycled
-  # when a new allocation request is made.
-  def test_find_open_ip_already_allocated
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
-
-    @container.stubs(:get_allocated_private_ips).returns(["127.0.250.129"])
-
-    @container.stubs(:address_bound?).returns(false).once
-
-    assert_equal @container.find_open_ip(8080), "127.0.250.130"
-  end
-
-  # Verifies that nil is returned from find_open_ip when all requested ports are
-  # already bound on all possible IPs.
-  def test_find_open_ip_all_previously_bound
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
-
-    @container.stubs(:get_allocated_private_ips).returns([])
-
-    # Simulate an lsof call indicating the IP/port is already bound
-    @container.stubs(:address_bound?).returns(true).at_least_once
-
-    assert_nil @container.find_open_ip(8080)
-  end
-
-  # Verifies that nil is returned from find_open_ip when all possible IPs
-  # are already allocated to other endpoints.
-  def test_find_open_ip_all_previously_allocated
-    @container.stubs(:cart_model).returns(OpenShift::V1CartridgeModel.new(@config, nil))
-
-    # Stub out a mock allocated IP array which will always tell the caller
-    # that their input is included in the array. This simulates the case where
-    # any IP the caller wants appears to be already allocated by other endpoints.
-    allocated_array = mock()
-    @container.stubs(:get_allocated_private_ips).returns(allocated_array)
-    allocated_array.expects(:include?).returns(true).at_least_once
-
-    # Simulate an lsof call indicating the IP/port is available
-    OpenShift::Utils::ShellExec.stubs(:shellCmd).returns([nil, nil, 0])
-
-    assert_nil @container.find_open_ip(8080)
   end
 end

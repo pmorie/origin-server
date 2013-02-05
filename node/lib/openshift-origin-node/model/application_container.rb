@@ -61,7 +61,7 @@ module OpenShift
     def cart_model
       unless @cart_model
         @cart_model = (OpenShift::Utils::Sdk.is_new_sdk_app(@user.homedir)) ? 
-          V2CartridgeModel.new(@config, @user) : V1CartridgeModel.new(@config, @user)
+          V2CartridgeModel.new(@config, @user, self) : V1CartridgeModel.new(@config, @user, self)
       end
 
       @cart_model
@@ -131,53 +131,6 @@ module OpenShift
     def force_stop
       @state.value = ApplicationState::State::STOPPED
       UnixUser.kill_procs(@user.uid)
-    end
-
-    # Allocates and assigns private IP/port entries for a cartridge
-    # based on endpoint metadata for the cartridge.
-    #
-    # Returns nil on success, or raises an exception if any errors occur: all errors
-    # here are considered fatal.
-    def create_private_endpoints(cart_name)
-      cart = get_cartridge(cart_name)
-
-      allocated_ips = {}
-
-      cart.endpoints.each do |endpoint|
-        # Resuse previously allocated IPs of the same name. When recycling
-        # an IP, double-check that it's not bound to the target port, and
-        # bail if it's unexpectedly bound.
-        unless allocated_ips.has_key?(endpoint.private_ip_name)
-          # Allocate a new IP for the endpoint
-          private_ip = find_open_ip(endpoint.private_port)
-
-          if private_ip == nil
-            raise "No IP was available to create endpoint for cart #{cart.name} in gear #{@uuid}: "\
-              "#{endpoint.private_ip_name}(#{endpoint.private_port})"
-          end
-
-          @user.add_env_var(endpoint.private_ip_name, private_ip)
-
-          allocated_ips[endpoint.private_ip_name] = private_ip
-        end
-
-        private_ip = allocated_ips[endpoint.private_ip_name]
-
-        if address_bound?(private_ip, endpoint.private_port)
-          raise "Couldn't create private endpoint #{endpoint.private_ip_name}(#{endpoint.private_port}) "\
-            "because an existing process was bound to the IP (private_ip)"
-        end
-
-        @user.add_env_var(endpoint.private_port_name, endpoint.private_port)
-        
-        @logger.info("Created private endpoint for cart #{cart.name} in gear #{@uuid}: "\
-          "[#{endpoint.private_ip_name}=#{private_ip}, #{endpoint.private_port_name}=#{endpoint.private_port}]")
-      end
-    end
-
-    # TODO: How should this be implemented?
-    def delete_private_endpoints(cart_name)
-      raise "Not implemented"
     end
 
     # Creates public endpoints for the given cart. Public proxy mappings are created via
@@ -364,66 +317,7 @@ module OpenShift
       end
     end
 
-    # Finds the next IP address available for binding of the given port for
-    # the current gear user. The IP is assumed to be available only if:
-    #
-    #   1. The IP is not already associated with an existing endpoint defined
-    #      by any cartridge within the gear, and
-    #   2. The IP/port is not already bound to a process according to lsof.
-    #
-    # Returns a string IP address in dotted-quad notation if one is available
-    # for the given port, or returns nil if IP is available.
-    def find_open_ip(port)
-      allocated_ips = get_allocated_private_ips
-
-      open_ip = nil
-
-      for host_ip in 1..127
-        candidate_ip = UnixUser.get_ip_addr(@user.uid.to_i, host_ip)
-
-        # Skip the IP if it's already assigned to an endpoint
-        next if allocated_ips.include?(candidate_ip)
-
-        # Check to ensure the IP/port is not currently bound to another process
-        next if address_bound?(candidate_ip, port)
-        
-        open_ip = candidate_ip
-        break
-      end
-
-      return open_ip
-    end
-
-    # Returns true if the given IP and port are currently unbound
-    # according to lsof, otherwise false.
-    def address_unbound?(ip, port)
-      out, err, rc = shellCmd("/usr/sbin/lsof -i @#{ip}:#{port}")
-      return rc != 0
-    end
-
-    # Returns an array containing all currently allocated endpoint private
-    # IP addresses assigned to carts within the current gear, or an empty
-    # array if none are currently defined.
-    def get_allocated_private_ips
-      env = Utils::Environ::for_gear(@user.homedir)
-
-      allocated_ips = []
-
-      # Collect all existing endpoint IP allocations
-      @cart_model.process_cartridges do |cart_path|
-        cart_name = File.basename(cart_path)
-        cart = get_cartridge(cart_name)
-
-        cart.endpoints.each do |endpoint|
-          # TODO: If the private IP variable exists but the value isn't in
-          # the environment, what should happen?
-          ip = env[endpoint.private_ip_name]
-          allocated_ips << ip unless ip == nil
-        end
-      end
-
-      allocated_ips
-    end
+    
 
     # ---------------------------------------------------------------------
     # This code can only be reached by v2 model cartridges
