@@ -216,6 +216,6 @@ TODO: deal with node httpd bouncing somewhere
 
 #### Environment Variables
 
- 1. Read cartridge `env` directory
+ 1. Read /etc/openshift/env
  2. Read gear `.env` directory, merge into 1. overwriting duplicates
- 3. Read /etc/openshift/env, merge into 2. overwriting duplicates
+ 3. Read cartridge `env` directory, merge into 2. overwriting duplicates
