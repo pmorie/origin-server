@@ -21,12 +21,12 @@ require 'test_helper'
 module OpenShift
   class UtilsSpawnFunctionalTest < Test::Unit::TestCase
     def test_run_as
-      skip "run_as tests require root permissions"  if 0 != Process.uid
+      skip "run_as tests require root permissions" if 0 != Process.uid
 
-      uid = 1000
+      uid          = 1000
       out, err, rc = Utils.oo_spawn("touch #{Process.pid}.b",
-                                 :chdir => "/tmp",
-                                 :uid => uid)
+                                    chdir: "/tmp",
+                                    uid:   uid)
       assert_equal 0, rc
       assert_empty err
       assert_empty out
@@ -40,15 +40,41 @@ module OpenShift
     end
 
     def test_run_as_stdout
-      skip "run_as tests require root permissions"  if 0 != Process.uid
+      skip "run_as tests require root permissions" if 0 != Process.uid
 
-      uid = 1000
+      uid          = 1000
       out, err, rc = Utils.oo_spawn("echo Hello, World",
-                                 :chdir => "/tmp",
-                                 :uid => uid)
+                                    chdir: "/tmp",
+                                    uid:   uid)
       assert_equal 0, rc
       assert_empty err
       assert_equal "Hello, World\n", out
+    end
+
+    def test_expected_exitstatus_zero
+      out, err, rc = Utils.oo_spawn('/bin/true',
+                                    chdir:               "/tmp",
+                                    expected_exitstatus: 0)
+      assert_equal 0, rc
+      assert_empty err
+      assert_empty out
+    end
+
+    def test_expected_exitstatus
+      out, err, rc = Utils.oo_spawn('/bin/false',
+                                    chdir:               "/tmp",
+                                    expected_exitstatus: 1)
+      assert_equal 1, rc
+      assert_empty err
+      assert_empty out
+    end
+
+    def test_expected_exception
+      assert_raise(OpenShift::Utils::ShellExecutionException) do
+        Utils.oo_spawn('/bin/false',
+                       chdir:               "/tmp",
+                       expected_exitstatus: 0)
+      end
     end
   end
 end

@@ -62,7 +62,7 @@ module OpenShift
     #                              : If not set spawn() returns exitstatus from command otherwise
     #                              : raise an error if exitstatus is not expected_exitstatus
     #   :timeout                   : Maximum number of seconds to wait for command to finish. default: 3600
-    #   :uid                       : fork and spawn command as given user
+    #   :uid                       : fork and spawn command as given user, :expected_exitstatus is not supported.
     #   :gid                       : fork and spawn command as given user's group, defaults to uid
     def self.oo_spawn(command, options = {})
       opts                   = {}
@@ -108,6 +108,13 @@ module OpenShift
             _, status = Process.wait2 pid
 
             exit status.exitstatus if options[:uid] && fork_pid.nil?
+
+            if (!options[:expected_exitstatus].nil?) && (status.exitstatus != options[:expected_exitstatus])
+              raise OpenShift::Utils::ShellExecutionException.new(
+                        "Shell command '#{command}' returned an error. rc=#{status.exitstatus}",
+                        status.exitstatus, out, err)
+            end
+
             return [out, err, status.exitstatus]
           rescue TimeoutExceeded => e
             ShellExec.kill_process_tree(pid)
