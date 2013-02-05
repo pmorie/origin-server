@@ -17,8 +17,9 @@ require "test/unit"
 require "mocha"
 require "fileutils"
 require "openshift-origin-node/utils/environ"
+require 'test_helper'
 
-class MyTest < Test::Unit::TestCase
+class EnvironTest < Test::Unit::TestCase
 
   # Called before every test method runs. Can be used
   # to set up fixture information.

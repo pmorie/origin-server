@@ -3,7 +3,7 @@
 # incomplete
 
 require 'simplecov'
-SimpleCov.start 'rails' do
+SimpleCov.start do
   coverage_dir 'test/coverage/'
   command_name ENV["TEST_NAME"] || 'node tests'
 

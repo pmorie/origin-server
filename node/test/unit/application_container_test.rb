@@ -26,10 +26,9 @@ require 'openshift-origin-common'
 require 'test/unit'
 require 'fileutils'
 require 'mocha'
+require 'test_helper'
 
-# Run unit test manually
-# ruby -I node/lib:common/lib node/test/unit/application_container_test.rb
-class TestApplicationContainer < Test::Unit::TestCase
+class ApplicationContainerTest < Test::Unit::TestCase
 
   def setup
     # Set up the config

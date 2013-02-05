@@ -21,9 +21,10 @@ require "mocha"
 require "fileutils"
 require "openshift-origin-node/utils/application_state"
 require "openshift-origin-node/utils/shell_exec"
+require 'test_helper'
 
 module OpenShift
-  class ApplicationStateTest < Test::Unit::TestCase
+  class ApplicationStateFunctionalTest < Test::Unit::TestCase
 
     def setup
       skip "run_as tests require root permissions"  if 0 != Process.uid
