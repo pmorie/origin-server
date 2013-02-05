@@ -8,6 +8,8 @@ module OpenShift::Runtime
 
 		attr_reader :name, :namespace, :endpoints
 
+    @@ENDPOINT_PATTERN = /([A-Z_0-9]+):([A-Z_0-9]+)\((\d+)\):?([A-Z_0-9]+)?/
+
 		def initialize(manifest = {})
 			@name = manifest["Name"]
 			@namespace = manifest["Namespace"]
@@ -24,7 +26,7 @@ module OpenShift::Runtime
 			endpoints = []
 
 			endpoint_strings.each do |entry|
-        if m = /([A-Z_]+):([A-Z_]+)\((\d+)\):?([A-Z_]+)?/.match(entry)
+        if m = @@ENDPOINT_PATTERN.match(entry)
           private_ip_name = m[1]
           private_port_name = m[2]
           private_port_number = m[3].to_i
