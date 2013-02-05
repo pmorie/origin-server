@@ -41,28 +41,80 @@ module OpenShift
     end
 
     def test_unknown
-      ENV['SSH_ORIGINAL_COMMAND'] = 'expected_error'
-      rc                          = OpenShift::Application::TrapUser.new.apply
-      assert_equal 2, rc
+      ENV['SSH_ORIGINAL_COMMAND'] = 'unknown'
+      Kernel.stubs(:exec).with(
+          {},
+          "/bin/bash", "-c", "unknown"
+      ).returns(0)
+      OpenShift::Application::TrapUser.new.apply
     end
 
     def test_rhcsh
       # env["PS1"] = "rhcsh> "
       Kernel.stubs(:exec).with(
           {"PS1" => "rhcsh> "},
-          "/bin/bash",
-          ["/bin/bash", "--init-file", "/usr/bin/rhcsh", "-i"]
+          "/bin/bash", "--init-file", "/usr/bin/rhcsh", "-i"
       ).returns(0)
 
       ENV['SSH_ORIGINAL_COMMAND'] = 'rhcsh'
       OpenShift::Application::TrapUser.new.apply
     end
 
+    def test_rhcsh_argvs
+      # env["PS1"] = "rhcsh> "
+      Kernel.stubs(:exec).with(
+          {"PS1" => "rhcsh> "},
+          "/bin/bash", "--init-file", "/usr/bin/rhcsh", "-c", "ls", "/tmp"
+      ).returns(0)
+
+      ENV['SSH_ORIGINAL_COMMAND'] = 'rhcsh ls /tmp'
+      OpenShift::Application::TrapUser.new.apply
+    end
+
+    def test_ctl_all
+      Kernel.stubs(:exec).with(
+          {},
+          "/bin/bash", "-c", ". /usr/bin/rhcsh > /dev/null ; ctl_all start app001"
+      ).returns(0)
+
+      ENV['SSH_ORIGINAL_COMMAND'] = 'ctl_all start app001'
+      OpenShift::Application::TrapUser.new.apply
+    end
+
+    def test_snapshot
+      Kernel.stubs(:exec).with(
+          {},
+          "/bin/bash", "snapshot.sh"
+      ).returns(0)
+
+      ENV['SSH_ORIGINAL_COMMAND'] = 'snapshot'
+      OpenShift::Application::TrapUser.new.apply
+    end
+
+    def test_restore
+      Kernel.stubs(:exec).with(
+          {},
+          "/bin/bash", "restore.sh"
+      ).returns(0)
+
+      ENV['SSH_ORIGINAL_COMMAND'] = 'restore'
+      OpenShift::Application::TrapUser.new.apply
+    end
+
+    def test_restore_include_git
+      Kernel.stubs(:exec).with(
+          {},
+          "/bin/bash", "restore.sh", "INCLUDE_GIT"
+      ).returns(0)
+
+      ENV['SSH_ORIGINAL_COMMAND'] = 'restore INCLUDE_GIT'
+      OpenShift::Application::TrapUser.new.apply
+    end
+
     def test_cd
       Kernel.stubs(:exec).with(
           {},
-          "/bin/bash",
-          ["/bin/bash", "-c", "cd /tmp"]
+          "/bin/bash", "-c", "cd", "/tmp"
       ).returns(0)
 
       ENV['SSH_ORIGINAL_COMMAND'] = 'cd /tmp'
@@ -74,16 +126,62 @@ module OpenShift
       tail_opts = Base64.encode64("-n 100")
       Kernel.stubs(:exec).with(
           {},
-          "/usr/bin/tail",
-          ["/usr/bin/tail", "-n", "100", "-f", "app-root/logs/mock.log"]
+          "/usr/bin/tail", "-f", "-n", "100", "app-root/logs/mock.log"
       ).returns(0)
 
       Dir.chdir(@gear_dir) do
         ENV['SSH_ORIGINAL_COMMAND'] = "tail --opts #{tail_opts} app-root/logs/mock.log"
-        rc                          = OpenShift::Application::TrapUser.new.apply
-
-        assert_equal 1, rc
+        OpenShift::Application::TrapUser.new.apply
       end
+    end
+
+    def test_tail_with_follow
+      `echo Hello, World > #@logs_dir/mock.log`
+      tail_opts = Base64.encode64("-n 100 -f")
+      Kernel.stubs(:exec).with(
+          {},
+          "/usr/bin/tail", "-n", "100", "-f", "app-root/logs/mock.log"
+      ).returns(0)
+
+      Dir.chdir(@gear_dir) do
+        ENV['SSH_ORIGINAL_COMMAND'] = "tail --opts #{tail_opts} app-root/logs/mock.log"
+        OpenShift::Application::TrapUser.new.apply
+      end
+    end
+
+    def test_git_receive_pack
+      home_dir      = File.join("/tmp", Process.pid.to_s)
+      git_directory = File.join(home_dir, "git")
+      FileUtils.mkpath(git_directory)
+
+      config = mock('OpenShift::Config')
+      config.stubs(:get).with("GEAR_BASE_DIR").returns("/tmp")
+      OpenShift::Config.stubs(:new).returns(config)
+
+      old_home_dir = ENV['HOME']
+      ENV['HOME']  = home_dir
+      begin
+        Kernel.stubs(:exec).with(
+            {},
+            "/usr/bin/git-receive-pack", '~/git'
+        ).returns(0)
+
+        ENV['SSH_ORIGINAL_COMMAND'] = "git-receive-pack ~/git"
+        OpenShift::Application::TrapUser.new.apply
+      ensure
+        FileUtils.rm_rf(home_dir)
+        ENV['HOME'] = old_home_dir
+      end
+    end
+
+    def test_quota
+      Kernel.stubs(:exec).with(
+          {},
+          "/usr/bin/quota"
+      ).returns(0)
+
+      ENV['SSH_ORIGINAL_COMMAND'] = "quota"
+      OpenShift::Application::TrapUser.new.apply
     end
   end
 end
