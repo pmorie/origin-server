@@ -55,6 +55,14 @@ module OpenShift
     def add_cart(cart)
       OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
 
+      # Disable cgroups
+      # Acquire IP and expose
+      # Create standard env vars
+      # Create initial cart directory
+      # Setup gear git repo (add to unix user?)
+      # Populate gear git repo if cartridge provides template.
+      # Process cart ERB templates (still necessary?)
+      
     end
 
     def remove_cart(cart)
