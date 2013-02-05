@@ -17,9 +17,10 @@ require "test/unit"
 require "mocha"
 require "base64"
 require File.expand_path("../node/misc/bin/oo-trap-user.rb")
+require 'test_helper'
 
 module OpenShift
-  class TrapUserTest < Test::Unit::TestCase
+  class TrapUserFunctionalTest < Test::Unit::TestCase
 
     # Called before every test method runs. Can be used
     # to set up fixture information.
