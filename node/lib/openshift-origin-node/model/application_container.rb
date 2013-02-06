@@ -342,95 +342,123 @@ module OpenShift
       end
     end
 
-    
 
     # ---------------------------------------------------------------------
     # This code can only be reached by v2 model cartridges
 
     # start gear
+    #
+    # Throws ShellExecutionException on failure
     def start
       @state.value = ApplicationState::State::STARTED
       do_control("start")
     end
 
     # stop gear
+    #
+    # Throws ShellExecutionException on failure
     def stop
       @state.value = ApplicationState::State::STOPPED
       do_control("stop")
     end
 
     # build application
+    #
+    # Throws ShellExecutionException on failure
     def build
       @state.value = ApplicationState::State::BUILDING
       do_control("stop")
     end
 
     # deploy application
+    #
+    # Throws ShellExecutionException on failure
     def deploy
       @state.value = ApplicationState::State::DEPLOYING
       do_control("stop")
     end
 
     # restart gear as supported by cartridges
+    #
+    # Throws ShellExecutionException on failure
     def restart
       do_control("restart")
     end
 
     # reload gear as supported by cartridges
+    #
+    # Throws ShellExecutionException on failure
     def reload
       do_control("reload")
     end
 
     # restore gear from tar ball
+    #
+    # Throws ShellExecutionException on failure
     def restore
       raise NotImplementedError("restore")
     end
 
     # write gear to tar ball
+    #
+    # Throws ShellExecutionException on failure
     def snapshot
       raise NotImplementedError("snapshot")
     end
 
     # PRIVATE: execute action using each cartridge's control script in gear
-    # FIXME: handle stdout, stderr and exceptions
     def do_control(action)
-      gear_env     = Utils::Environ.load(File.join(user.home_dir, ".env")).
-          merge(Utils::Environ.load("/etc/openshift/env"))
-      action_hooks = File.join(user.home_dir, %w{app-root runtime repo .openshift action_hooks})
+      gear_env     = Utils::Environ.load('/etc/openshift/env', File.join(user.homedir, '.env'))
+      action_hooks = File.join(user.homedir, %w{app-root runtime repo .openshift action_hooks})
+      buffer       = ''
 
       pre_action = File.join(action_hooks, "pre_#{action}")
-      _, _, rc   = Utils.oo_spawn(pre_action,
-                                  :env             => gear_env,
-                                  :unsetenv_others => true,
-                                  :chdir           => user.home_dir)
+      if File.executable?(pre_action)
+        out, _, _ = Utils.oo_spawn(pre_action,
+                                   env:                 gear_env,
+                                   unsetenv_others:     true,
+                                   chdir:               user.homedir,
+                                   expected_exitstatus: 0)
+        buffer << out
+      end
 
-      @cart_model.process_cartridges { |path|
-        cartridge_env = Utils::Environ.load(File.join(path, "env")).merge(gear_env)
+      begin
+        @cart_model.process_cartridges { |path|
+          cartridge_env = gear_env.merge(Utils::Environ.load(File.join(path, "env")))
 
-        control = Files.join(path, %w{bin control})
-        unless File.executable? control
-          raise "Corrupt cartridge: #{control} must exist and be executable"
-        end
+          control = Files.join(path, %w{bin control})
+          unless File.executable? control
+            raise "Corrupt cartridge: #{control} must exist and be executable"
+          end
 
-        cartridge   = File.basename(path)
-        pre_action  = File.join(action_hooks, "pre_#{action}_#{cartridge}")
-        post_action = File.join(action_hooks, "post_#{action}_#{cartridge}")
+          cartridge   = File.basename(path)
+          pre_action  = File.join(action_hooks, "pre_#{action}_#{cartridge}")
+          post_action = File.join(action_hooks, "post_#{action}_#{cartridge}")
 
-        command = ''
-        command += "source #{pre_action}; " if File.exist? pre_action
-        command += "#{control} #{action}  "
-        command += "; #{post_action}      " if File.exist? post_action
-        _, _, rc = Utils.oo_spawn(command,
-                                  :env             => cartridge_env,
-                                  :unsetenv_others => true,
-                                  :chdir           => user.home_dir)
-      }
+          command = ''
+          command << "source #{pre_action};  " if File.exist? pre_action
+          command << "#{control} #{action}   "
+          command << "; source #{post_action}" if File.exist? post_action
 
-      post_action = File.join(action_hooks, "post_#{action}")
-      _, _, rc    = Utils.oo_spawn(post_action,
-                                   :env             => gear_env,
-                                   :unsetenv_others => true,
-                                   :chdir           => user.home_dir)
+          out, _, _ = Utils.oo_spawn(command,
+                                     env:                 cartridge_env,
+                                     unsetenv_others:     true,
+                                     chdir:               user.homedir,
+                                     expected_exitstatus: 0)
+          buffer << out
+        }
+        return buffer, 0
+      ensure
+        # TODO: If post hooks are a failure condition then node operations can be blocked. Is this the right place for this logic?
+        # E.g. a broken cartridge should not prevent moving gears
+        post_action = File.join(action_hooks, "post_#{action}")
+        _, err, rc  = Utils.oo_spawn(post_action,
+                                     env:             gear_env,
+                                     unsetenv_others: true,
+                                     chdir:           user.homedir)
+        @logger.info("Failed hook: #{post_action} for #@application_uuid exitstatus #{rc}\n#{err}") if 0 != rc
+        # FIXME: This should log somewhere the application developer can find it.
+      end
     end
     # ---------------------------------------------------------------------
   end
