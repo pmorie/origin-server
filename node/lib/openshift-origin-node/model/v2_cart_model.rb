@@ -188,5 +188,58 @@ module OpenShift
         yield cart_dir
       end
     end
+
+    # Execute action using each cartridge's control script in gear
+    def do_control(action, cart_name=nil)
+      buffer       = ''
+      gear_env     = Utils::Environ.load('/etc/openshift/env', File.join(user.homedir, '.env'))
+      action_hooks = File.join(user.homedir, %w{app-root runtime repo .openshift action_hooks})
+
+      pre_action = File.join(action_hooks, "pre_#{action}")
+      if File.executable?(pre_action)
+        out, _, _ = Utils.oo_spawn(pre_action,
+                                   env:                 gear_env,
+                                   unsetenv_others:     true,
+                                   chdir:               user.homedir,
+                                   expected_exitstatus: 0)
+        buffer << out
+      end
+
+      @cart_model.process_cartridges { |path|
+        cartridge_env = gear_env.merge(Utils::Environ.load(File.join(path, "env")))
+
+        control = Files.join(path, %w{bin control})
+        unless File.executable? control
+          raise "Corrupt cartridge: #{control} must exist and be executable"
+        end
+
+        cartridge   = File.basename(path)
+        pre_action  = File.join(action_hooks, "pre_#{action}_#{cartridge}")
+        post_action = File.join(action_hooks, "post_#{action}_#{cartridge}")
+
+        command = ''
+        command << "source #{pre_action};  " if File.exist? pre_action
+        command << "#{control} #{action}   "
+        command << "; source #{post_action}" if File.exist? post_action
+
+        out, _, _ = Utils.oo_spawn(command,
+                                   env:                 cartridge_env,
+                                   unsetenv_others:     true,
+                                   chdir:               user.homedir,
+                                   expected_exitstatus: 0)
+        buffer << out
+      }
+
+      post_action = File.join(action_hooks, "post_#{action}")
+      if File.executable?(post_action)
+        out, _, _ = Utils.oo_spawn(post_action,
+                                   env:                 gear_env,
+                                   unsetenv_others:     true,
+                                   chdir:               user.homedir,
+                                   expected_exitstatus: 0)
+        buffer << out
+      end
+      buffer
+    end
   end
 end

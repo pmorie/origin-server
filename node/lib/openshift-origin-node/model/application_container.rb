@@ -70,7 +70,7 @@ module OpenShift
     def establish_cart_model(cart)
       unless @cart_model
         @cart_model = (OpenShift::Utils::Sdk.v1_cartridges.include?(cart)) ? 
-          V1CartridgeModel.new(@config, @user) : V2CartridgeModel.new(@config, @user)
+          V1CartridgeModel.new(@config, @user, self, @logger) : V2CartridgeModel.new(@config, @user, self, @logger)
       end
     end
 
@@ -80,7 +80,7 @@ module OpenShift
     def cart_model
       unless @cart_model
         @cart_model = (OpenShift::Utils::Sdk.is_new_sdk_app(@user.homedir)) ? 
-          V2CartridgeModel.new(@config, @user, self) : V1CartridgeModel.new(@config, @user, self)
+          V2CartridgeModel.new(@config, @user, self, @logger) : V1CartridgeModel.new(@config, @user, self, @logger)
       end
 
       @cart_model
@@ -342,123 +342,53 @@ module OpenShift
       end
     end
 
-    
-
-    # ---------------------------------------------------------------------
-    # This code can only be reached by v2 model cartridges
-
     # start gear
-    #
     # Throws ShellExecutionException on failure
-    def start
-      @state.value = ApplicationState::State::STARTED
-      do_control("start")
+    def start(cart_name = nil)
+      @state.value = OpenShift::State::STARTED
+      cart_model.do_control("start", cart_name)
     end
 
     # stop gear
-    #
-    # Throws ShellExecutionException on failure
-    def stop
-      @state.value = ApplicationState::State::STOPPED
-      do_control("stop")
+    def stop(cart_name = nil)
+      @state.value = OpenShift::State::STOPPED
+      cart_model.do_control("stop", cart_name)
     end
 
     # build application
-    #
-    # Throws ShellExecutionException on failure
-    def build
-      @state.value = ApplicationState::State::BUILDING
-      do_control("stop")
+    def build(cart_name = nil)
+      @state.value = OpenShift::State::BUILDING
+      cart_model.do_control("build", cart_name)
     end
 
     # deploy application
-    #
-    # Throws ShellExecutionException on failure
-    def deploy
-      @state.value = ApplicationState::State::DEPLOYING
-      do_control("stop")
+    def deploy(cart_name = nil)
+      @state.value = OpenShift::State::DEPLOYING
+      cart_model.do_control("deploy", cart_name)
     end
 
     # restart gear as supported by cartridges
-    #
-    # Throws ShellExecutionException on failure
-    def restart
-      do_control("restart")
+    def restart(cart_name = nil)
+      cart_model.do_control("restart", cart_name)
     end
 
     # reload gear as supported by cartridges
-    #
-    # Throws ShellExecutionException on failure
-    def reload
-      do_control("reload")
+    def reload(cart_name = nil)
+      cart_model.do_control("reload", cart_name)
     end
 
     # restore gear from tar ball
-    #
-    # Throws ShellExecutionException on failure
-    def restore
+    def restore(cart_name = nil)
       raise NotImplementedError("restore")
     end
 
     # write gear to tar ball
-    #
-    # Throws ShellExecutionException on failure
-    def snapshot
+    def snapshot(cart_name = nil)
       raise NotImplementedError("snapshot")
     end
 
-    # PRIVATE: execute action using each cartridge's control script in gear
-    def do_control(action)
-      buffer       = ''
-      gear_env     = Utils::Environ.load('/etc/openshift/env', File.join(user.homedir, '.env'))
-      action_hooks = File.join(user.homedir, %w{app-root runtime repo .openshift action_hooks})
-
-      pre_action = File.join(action_hooks, "pre_#{action}")
-      if File.executable?(pre_action)
-        out, _, _ = Utils.oo_spawn(pre_action,
-                                   env:                 gear_env,
-                                   unsetenv_others:     true,
-                                   chdir:               user.homedir,
-                                   expected_exitstatus: 0)
-        buffer << out
-      end
-
-      @cart_model.process_cartridges { |path|
-        cartridge_env = gear_env.merge(Utils::Environ.load(File.join(path, "env")))
-
-        control = Files.join(path, %w{bin control})
-        unless File.executable? control
-          raise "Corrupt cartridge: #{control} must exist and be executable"
-        end
-
-        cartridge   = File.basename(path)
-        pre_action  = File.join(action_hooks, "pre_#{action}_#{cartridge}")
-        post_action = File.join(action_hooks, "post_#{action}_#{cartridge}")
-
-        command = ''
-        command << "source #{pre_action};  " if File.exist? pre_action
-        command << "#{control} #{action}   "
-        command << "; source #{post_action}" if File.exist? post_action
-
-        out, _, _ = Utils.oo_spawn(command,
-                                   env:                 cartridge_env,
-                                   unsetenv_others:     true,
-                                   chdir:               user.homedir,
-                                   expected_exitstatus: 0)
-        buffer << out
-      }
-
-      post_action = File.join(action_hooks, "post_#{action}")
-      if File.executable?(post_action)
-        out, _, _ = Utils.oo_spawn(post_action,
-                                   env:                 gear_env,
-                                   unsetenv_others:     true,
-                                   chdir:               user.homedir,
-                                   expected_exitstatus: 0)
-        buffer << out
-      end
-      buffer
+    def status(cart_name = nil)
+      cart_model.do_control("status", cart_name)
     end
-    # ---------------------------------------------------------------------
   end
 end
