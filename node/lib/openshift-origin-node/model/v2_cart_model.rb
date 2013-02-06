@@ -4,6 +4,8 @@ require 'openshift-origin-node/utils/shell_exec'
 
 module OpenShift
   class V2CartridgeModel
+    attr_reader :user, :gear
+
     def initialize(config, user, gear, logger = nil)
       @config = config
       @user = user
@@ -18,34 +20,48 @@ module OpenShift
 
     def destroy(skip_hooks = false)
       # TODO: honor skip_hooks
-      Dir.entries(@user.homedir).each do |gear_subdir|
+      output = ''
+      errout = ''
+      retcode = 0
+
+      process_cartridges do |gear_subdir|
         teardown_hook = File.join(@config.get('CARTRIDGE_BASE_PATH'), cart, 'bin', 'teardown')
 
         next unless File.exists?(teardown_hook)
 
         begin
           # Execute the hook in the context of the gear user
-          @logger.debug("Executing cart teardown hook #{teardown_hook} in gear #{@gear.uuid} as user #{@user.uid}:#{@user.gid}")
-          run_as(@user.uid, @user.gid, teardown_hook, gear_dir, false, 0, @timeout)
+          @logger.debug("Executing cart teardown hook #{teardown_hook} in gear #{@gear.uuid} as user #{user.uid}:#{user.gid}")
+          #run_as(user.uid, user.gid, teardown_hook, gear_subdir, false, 0, @timeout)
+          # TODO: capture return code, output?
+          err, out, rc = Utils.oo_spawn(teardown_hook, { uid: user.uid, gid: user.gid, chdir: gear_subdir, expected_exitstatus: 0, timeout: @timeout})
+
+          errout << err if not err.nil?
+          output << out if not out.nil?
+          recode = 121 if rc != 0
         rescue OpenShift::Utils::ShellExecutionException => e
           @logger.warn("Cartridge tidy operation failed on gear #{@gear.uuid} for cart #{gear_dir}: #{e.message} (rc=#{e.rc})")
         end
       end
 
-      @user.destroy
+      user.destroy
+
+      output, errout, retcode
     end
 
     def tidy
       # TODO: introduce better implementation using Cartridge model class
-      Dir.entries(@user.homedir).each do |gear_subdir|
+      process_cartridges do |gear_subdir|
         tidy_script = File.join(@config.get('CARTRIDGE_BASE_PATH'), cart, 'bin', 'control') + ' tidy'
           
         next unless File.exists?(tidy_script)
 
         begin
           # Execute the hook in the context of the gear user
-          @logger.debug("Executing cart tidy script #{tidy_script} in gear #{@gear.uuid} as user #{@user.uid}:#{@user.gid}")
-          run_as(@user.uid, @user.gid, tidy_script, gear_dir, false, 0, @timeout)
+          @logger.debug("Executing cart tidy script #{tidy_script} in gear #{@gear.uuid} as user #{user.uid}:#{user.gid}")
+          # TODO: capture return code, output?
+          Utils.oo_spawn(tidy_script, { uid: user.uid, gid: user.gid, chdir: gear_subdir, expected_exitstatus: 0, timeout: @timeout})
+          #run_as(user.uid, user.gid, tidy_script, gear_subdir, false, 0, @timeout)
         rescue OpenShift::Utils::ShellExecutionException => e
           @logger.warn("Cartridge tidy operation failed on gear #{@gear.uuid} for cart #{gear_dir}: #{e.message} (rc=#{e.rc})")
         end
@@ -53,20 +69,123 @@ module OpenShift
     end
 
     def add_cart(cart)
-      OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
+      OpenShift::Utils::Sdk.mark_new_sdk_app(user.homedir)
+      OpenShift::Utils::Cgroups.disable_cgroups(user.uid)
+      create_private_endpoints(cart)
+      create_standard_env_vars(cart)
+      create_cart_directory(cart)
+      create_gear_repo(cart)
+      process_erb_templates(cart)
 
-      # Disable cgroups
-      # Acquire IP and expose
-      # Create standard env vars
-      # Create initial cart directory
-      # Setup gear git repo (add to unix user?)
-      # Populate gear git repo if cartridge provides template.
-      # Process cart ERB templates (still necessary?)
-      
+      unlock_gear(cart) do
+        cart_setup(cart) 
+        populate_gear_repo(cart)
+      end
+
+      do_control(cart, 'start')
+      OpenShift::FrontendHttpServer.new(user.container_uuid, user.container_name, user.namespace).reload_httpd
+      Openshift::Utils::Cgroups.enable_cgroups(user.uid)
     end
 
     def remove_cart(cart)
+      delete_private_endpoints(cart)
+      OpenShift::Utils::Cgroups.disable_cgroups(user.uid)
+      do_control(cart, 'stop')
 
+      unlock_gear(cart) { cart_teardown(cart) }
+
+      delete_cart_directory(cart)
+      Openshift::Utils::Cgroups.enable_cgroups(user.uid)
+      OpenShift::FrontendHttpServer.new(user.container_uuid, user.container_name, user.namespace).reload_httpd
+    end
+
+    def unlock_gear(cart)
+
+    end
+
+    def create_standard_env_vars(cart)
+
+    end
+
+    def create_cart_directory(cart)
+
+    end
+
+    def delete_cart_directory(cart)
+
+    end
+
+    def create_gear_repo(cart)
+
+    end
+
+    def populate_gear_repo(cart)
+
+    end
+
+    def process_erb_templates(cart)
+
+    end
+
+    def cart_setup(cart)
+
+    end
+
+    def cart_teardown(cart)
+
+    end
+
+    # Execute action using each cartridge's control script in gear
+    def do_control(action, cart_name=nil)
+      buffer       = ''
+      gear_env     = Utils::Environ.load('/etc/openshift/env', File.join(user.homedir, '.env'))
+      action_hooks = File.join(user.homedir, %w{app-root runtime repo .openshift action_hooks})
+
+      pre_action = File.join(action_hooks, "pre_#{action}")
+      if File.executable?(pre_action)
+        out, _, _ = Utils.oo_spawn(pre_action,
+                                   env:                 gear_env,
+                                   unsetenv_others:     true,
+                                   chdir:               user.homedir,
+                                   expected_exitstatus: 0)
+        buffer << out
+      end
+
+      @cart_model.process_cartridges { |path|
+        cartridge_env = gear_env.merge(Utils::Environ.load(File.join(path, "env")))
+
+        control = Files.join(path, %w{bin control})
+        unless File.executable? control
+          raise "Corrupt cartridge: #{control} must exist and be executable"
+        end
+
+        cartridge   = File.basename(path)
+        pre_action  = File.join(action_hooks, "pre_#{action}_#{cartridge}")
+        post_action = File.join(action_hooks, "post_#{action}_#{cartridge}")
+
+        command = ''
+        command << "source #{pre_action};  " if File.exist? pre_action
+        command << "#{control} #{action}   "
+        command << "; source #{post_action}" if File.exist? post_action
+
+        out, _, _ = Utils.oo_spawn(command,
+                                   env:                 cartridge_env,
+                                   unsetenv_others:     true,
+                                   chdir:               user.homedir,
+                                   expected_exitstatus: 0)
+        buffer << out
+      }
+
+      post_action = File.join(action_hooks, "post_#{action}")
+      if File.executable?(post_action)
+        out, _, _ = Utils.oo_spawn(post_action,
+                                   env:                 gear_env,
+                                   unsetenv_others:     true,
+                                   chdir:               user.homedir,
+                                   expected_exitstatus: 0)
+        buffer << out
+      end
+      buffer
     end
 
     # Allocates and assigns private IP/port entries for a cartridge
@@ -80,7 +199,7 @@ module OpenShift
       allocated_ips = {}
 
       cart.endpoints.each do |endpoint|
-        # Reuse previously allocated IPs of the same name. When recycling
+        # Resuse previously allocated IPs of the same name. When recycling
         # an IP, double-check that it's not bound to the target port, and
         # bail if it's unexpectedly bound.
         unless allocated_ips.has_key?(endpoint.private_ip_name)
@@ -162,7 +281,7 @@ module OpenShift
       allocated_ips = []
 
       # Collect all existing endpoint IP allocations
-      @cart_model.process_cartridges do |cart_path|
+      process_cartridges do |cart_path|
         cart_name = File.basename(cart_path)
         cart = get_cartridge(cart_name)
 
@@ -187,59 +306,6 @@ module OpenShift
             (not File.directory? cart_dir)
         yield cart_dir
       end
-    end
-
-    # Execute action using each cartridge's control script in gear
-    def do_control(action, cart_name=nil)
-      buffer       = ''
-      gear_env     = Utils::Environ.load('/etc/openshift/env', File.join(user.homedir, '.env'))
-      action_hooks = File.join(user.homedir, %w{app-root runtime repo .openshift action_hooks})
-
-      pre_action = File.join(action_hooks, "pre_#{action}")
-      if File.executable?(pre_action)
-        out, _, _ = Utils.oo_spawn(pre_action,
-                                   env:                 gear_env,
-                                   unsetenv_others:     true,
-                                   chdir:               user.homedir,
-                                   expected_exitstatus: 0)
-        buffer << out
-      end
-
-      @cart_model.process_cartridges { |path|
-        cartridge_env = gear_env.merge(Utils::Environ.load(File.join(path, "env")))
-
-        control = Files.join(path, %w{bin control})
-        unless File.executable? control
-          raise "Corrupt cartridge: #{control} must exist and be executable"
-        end
-
-        cartridge   = File.basename(path)
-        pre_action  = File.join(action_hooks, "pre_#{action}_#{cartridge}")
-        post_action = File.join(action_hooks, "post_#{action}_#{cartridge}")
-
-        command = ''
-        command << "source #{pre_action};  " if File.exist? pre_action
-        command << "#{control} #{action}   "
-        command << "; source #{post_action}" if File.exist? post_action
-
-        out, _, _ = Utils.oo_spawn(command,
-                                   env:                 cartridge_env,
-                                   unsetenv_others:     true,
-                                   chdir:               user.homedir,
-                                   expected_exitstatus: 0)
-        buffer << out
-      }
-
-      post_action = File.join(action_hooks, "post_#{action}")
-      if File.executable?(post_action)
-        out, _, _ = Utils.oo_spawn(post_action,
-                                   env:                 gear_env,
-                                   unsetenv_others:     true,
-                                   chdir:               user.homedir,
-                                   expected_exitstatus: 0)
-        buffer << out
-      end
-      buffer
     end
   end
 end
