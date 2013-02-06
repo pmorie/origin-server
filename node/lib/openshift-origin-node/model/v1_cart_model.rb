@@ -97,6 +97,10 @@ module OpenShift
       handle_cartridge_action(cart, 'deconfigure', "#{@user.app_name} #{@user.namespace} #{@user.container_uuid}")
     end
 
+    def do_control(action, cart_name)
+      handle_cartridge_action(cart_name, action, "#{@user.app_name} #{@user.namespace} #{@user.container_uuid}")
+    end
+
     #------------------------------------
     # XXX: below code ripped from mcollective agent
 
@@ -121,7 +125,7 @@ module OpenShift
       exitcode, output = complete_process_gracefully(pid, stdin, stdout) if exitcode == 0
 
       #XXX: account for run_hook vs. run_hook_output in test.
-      return exitcode
+      return exitcode, output
     end
 
     def complete_process_gracefully(pid, stdin, stdout)
