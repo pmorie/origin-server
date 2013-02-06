@@ -13,10 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #++
+require 'test_helper'
 require "test/unit"
 require "mocha"
 require "openshift-origin-node/utils/shell_exec"
-require 'test_helper'
 
 module OpenShift
   class UtilsSpawnTest < Test::Unit::TestCase
@@ -51,7 +51,7 @@ module OpenShift
     def test_timeout
       assert_raises OpenShift::Utils::ShellExecutionException do
         Utils.oo_spawn("sleep 15",
-                    :timeout => 1)
+                       :timeout => 1)
       end
     end
 

@@ -80,7 +80,7 @@ module OpenShift
       allocated_ips = {}
 
       cart.endpoints.each do |endpoint|
-        # Resuse previously allocated IPs of the same name. When recycling
+        # Reuse previously allocated IPs of the same name. When recycling
         # an IP, double-check that it's not bound to the target port, and
         # bail if it's unexpectedly bound.
         unless allocated_ips.has_key?(endpoint.private_ip_name)

@@ -19,6 +19,7 @@
 #
 module OpenShift; end
 
+require 'test_helper'
 require 'openshift-origin-node/model/application_container'
 require 'openshift-origin-node/model/v1_cart_model'
 require 'openshift-origin-node/utils/environ'
@@ -26,7 +27,6 @@ require 'openshift-origin-common'
 require 'test/unit'
 require 'fileutils'
 require 'mocha'
-require 'test_helper'
 
 class ApplicationContainerTest < Test::Unit::TestCase
 
@@ -167,7 +167,6 @@ class ApplicationContainerTest < Test::Unit::TestCase
 
     OpenShift::Utils::Environ.stubs(:for_gear).returns(
         {'OPENSHIFT_HOMEDIR' => '/foo', 'OPENSHIFT_APP_NAME' => 'app_name' })
-
 
     @container.expects(:stop_gear).with('/foo').once
     @container.expects(:gear_level_tidy).with('/foo/git/app_name.git', '/foo/.tmp').raises(Exception.new).once

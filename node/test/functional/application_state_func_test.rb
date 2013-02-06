@@ -14,6 +14,7 @@
 # limitations under the License.
 #++
 
+require 'test_helper'
 require "rubygems"
 require "etc"
 require "test/unit"
@@ -21,7 +22,6 @@ require "mocha"
 require "fileutils"
 require "openshift-origin-node/utils/application_state"
 require "openshift-origin-node/utils/shell_exec"
-require 'test_helper'
 
 module OpenShift
   class ApplicationStateFunctionalTest < Test::Unit::TestCase

@@ -13,11 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #++
+require 'test_helper'
 require "test/unit"
 require "mocha"
 require "fileutils"
 require "openshift-origin-node/utils/environ"
-require 'test_helper'
 
 class EnvironTest < Test::Unit::TestCase
 
@@ -68,10 +68,12 @@ class EnvironTest < Test::Unit::TestCase
     File.open(File.join(@gear_env, 'DEFAULT_LABEL'), 'w') { |fd|
       fd.write('export DEFAULT_LABEL="bogus"')
     }
+    env = OpenShift::Utils::Environ.for_gear(File.join('/tmp', @uuid))
+        assert_equal 'bogus', env['DEFAULT_LABEL']
+    
     File.open(File.join(@cart_env, 'DEFAULT_LABEL'), 'w') { |fd|
       fd.write('export DEFAULT_LABEL="VIP"')
     }
-
     env = OpenShift::Utils::Environ.for_gear(File.join('/tmp', @uuid))
     assert_equal 'VIP', env['DEFAULT_LABEL']
   end

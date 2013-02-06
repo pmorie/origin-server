@@ -17,10 +17,10 @@
 #
 # Test the OpenShift unix_user model
 #
+require 'test_helper'
 require 'openshift-origin-node/model/unix_user'
 require 'test/unit'
 require 'mocha'
-require 'test_helper'
 
 class UnixUserModelFunctionalTest < Test::Unit::TestCase
 

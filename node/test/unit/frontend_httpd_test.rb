@@ -17,11 +17,11 @@
 #
 # Test the OpenShift frontend_httpd model
 #
+require 'test_helper'
 require 'openshift-origin-node/model/frontend_httpd'
 require 'test/unit'
 require 'fileutils'
 require 'mocha'
-require 'test_helper'
 
 class FrontendHttpServerModelTest < Test::Unit::TestCase
 

@@ -19,6 +19,7 @@
 #
 module OpenShift; end
 
+require 'test_helper'
 require 'openshift-origin-node/model/application_container'
 require 'openshift-origin-node/model/v2_cart_model'
 require 'openshift-origin-node/utils/environ'
@@ -26,7 +27,6 @@ require 'openshift-origin-common'
 require 'test/unit'
 require 'fileutils'
 require 'mocha'
-require 'test_helper'
 
 class V2CartModelTest < Test::Unit::TestCase
 
