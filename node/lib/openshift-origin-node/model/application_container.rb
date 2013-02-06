@@ -342,6 +342,7 @@ module OpenShift
       end
     end
 
+    
 
     # ---------------------------------------------------------------------
     # This code can only be reached by v2 model cartridges
@@ -408,9 +409,9 @@ module OpenShift
 
     # PRIVATE: execute action using each cartridge's control script in gear
     def do_control(action)
+      buffer       = ''
       gear_env     = Utils::Environ.load('/etc/openshift/env', File.join(user.homedir, '.env'))
       action_hooks = File.join(user.homedir, %w{app-root runtime repo .openshift action_hooks})
-      buffer       = ''
 
       pre_action = File.join(action_hooks, "pre_#{action}")
       if File.executable?(pre_action)
@@ -422,43 +423,41 @@ module OpenShift
         buffer << out
       end
 
-      begin
-        @cart_model.process_cartridges { |path|
-          cartridge_env = gear_env.merge(Utils::Environ.load(File.join(path, "env")))
+      @cart_model.process_cartridges { |path|
+        cartridge_env = gear_env.merge(Utils::Environ.load(File.join(path, "env")))
 
-          control = Files.join(path, %w{bin control})
-          unless File.executable? control
-            raise "Corrupt cartridge: #{control} must exist and be executable"
-          end
+        control = Files.join(path, %w{bin control})
+        unless File.executable? control
+          raise "Corrupt cartridge: #{control} must exist and be executable"
+        end
 
-          cartridge   = File.basename(path)
-          pre_action  = File.join(action_hooks, "pre_#{action}_#{cartridge}")
-          post_action = File.join(action_hooks, "post_#{action}_#{cartridge}")
+        cartridge   = File.basename(path)
+        pre_action  = File.join(action_hooks, "pre_#{action}_#{cartridge}")
+        post_action = File.join(action_hooks, "post_#{action}_#{cartridge}")
 
-          command = ''
-          command << "source #{pre_action};  " if File.exist? pre_action
-          command << "#{control} #{action}   "
-          command << "; source #{post_action}" if File.exist? post_action
+        command = ''
+        command << "source #{pre_action};  " if File.exist? pre_action
+        command << "#{control} #{action}   "
+        command << "; source #{post_action}" if File.exist? post_action
 
-          out, _, _ = Utils.oo_spawn(command,
-                                     env:                 cartridge_env,
-                                     unsetenv_others:     true,
-                                     chdir:               user.homedir,
-                                     expected_exitstatus: 0)
-          buffer << out
-        }
-        return buffer, 0
-      ensure
-        # TODO: If post hooks are a failure condition then node operations can be blocked. Is this the right place for this logic?
-        # E.g. a broken cartridge should not prevent moving gears
-        post_action = File.join(action_hooks, "post_#{action}")
-        _, err, rc  = Utils.oo_spawn(post_action,
-                                     env:             gear_env,
-                                     unsetenv_others: true,
-                                     chdir:           user.homedir)
-        @logger.info("Failed hook: #{post_action} for #@application_uuid exitstatus #{rc}\n#{err}") if 0 != rc
-        # FIXME: This should log somewhere the application developer can find it.
+        out, _, _ = Utils.oo_spawn(command,
+                                   env:                 cartridge_env,
+                                   unsetenv_others:     true,
+                                   chdir:               user.homedir,
+                                   expected_exitstatus: 0)
+        buffer << out
+      }
+
+      post_action = File.join(action_hooks, "post_#{action}")
+      if File.executable?(post_action)
+        out, _, _ = Utils.oo_spawn(post_action,
+                                   env:                 gear_env,
+                                   unsetenv_others:     true,
+                                   chdir:               user.homedir,
+                                   expected_exitstatus: 0)
+        buffer << out
       end
+      buffer
     end
     # ---------------------------------------------------------------------
   end
