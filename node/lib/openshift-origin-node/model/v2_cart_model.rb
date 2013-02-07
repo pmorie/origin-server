@@ -102,7 +102,7 @@ module OpenShift
     def unlock_gear(cart_name)
       begin
         do_unlock_gear(cart_name)
-
+        yield
       ensure
         do_lock_gear(cart_name)
       end
