@@ -35,8 +35,7 @@ module OpenShift
     include OpenShift::Utils::ShellExec
     include ActiveModel::Observing
 
-    attr_reader :uuid, :application_uuid, :user, :state
-
+    attr_reader :uuid, :application_uuid, :user, :state, :mixin_loaded
 
     def initialize(application_uuid, container_uuid, user_uid = nil,
         app_name = nil, container_name = nil, namespace = nil, quota_blocks = nil, quota_files = nil, logger = nil)
@@ -50,8 +49,8 @@ module OpenShift
         app_name, container_name, namespace, quota_blocks, quota_files)
       @state = OpenShift::Utils::ApplicationState.new(container_uuid)
 
-      # smells
-      @cart_model = nil
+      @mixin_loaded = false
+      bootstrap_cart_mixin
     end
 
     def name
@@ -59,31 +58,60 @@ module OpenShift
     end
 
     #-----------------------------------
-    # Cart Model:
+    # Cart Mixins
     # 
-    # There are two use cases for determining the cartridge
-    # model to use:
+    # There are two use cases for loading a cart behavior mixin:
     # 
     # 1. ApplicationContainer is created for a new application which
-    #    contains no cartridges and the model must be inferred from the name
-    #    of the cartridge being added
-    def establish_cart_model(cart)
-      unless @cart_model
-        @cart_model = (OpenShift::Utils::Sdk.v1_cartridges.include?(cart)) ? 
-          V1CartridgeModel.new(@config, @user, self, @logger) : V2CartridgeModel.new(@config, @user, self, @logger)
+    #    contains no cartridges and the mixin to use must be inferred
+    #    from the name of the cartridge being added.
+    def load_cart_mixin(cart_name)
+      unless mixin_loaded
+        if OpenShift::Utils::Sdk.v1_cartridges.include?(cart_name)
+          load_cart_mixin(:v1)
+        else
+          load_cart_mixin(:v2)
+        end
       end
     end
 
     # 2. ApplicationContainer is created for an existing app which
     #    already has a cartridge and thus an appropriate cart model
     #    to use.
-    def cart_model
-      unless @cart_model
-        @cart_model = (OpenShift::Utils::Sdk.is_new_sdk_app(@user.homedir)) ? 
-          V2CartridgeModel.new(@config, @user, self, @logger) : V1CartridgeModel.new(@config, @user, self, @logger)
+    def bootstrap_cart_mixin
+      unless mixin_loaded
+        if is_empty_app?
+          @logger.info("Unable to load cart mixin because application has no cartridges")
+          return false
+        end
+
+        if OpenShift::Utils::Sdk.is_new_sdk_app(user.homedir)
+          load_cart_mixin(:v2)
+        else
+          load_cart_mixin(:v1)
+        end
       end
 
-      @cart_model
+      mixin_loaded
+    end
+
+    def is_empty_app?
+      # TODO: determine how to establish empty app across v1/v2
+    end
+
+    # Load a particular cart mixin
+    def load_cart_mixin(version)
+      case version
+      when :v1
+        require_relative('./v1_cart_mixin')
+        self.extend(V1CartridgeMixin)
+        mixin_loaded = true
+      when :v2
+        require_relative('./v2_cart_mixin')
+        self.extend(V2CartridgeMixin)
+        mixin_loaded = true
+      # TODO: else
+      end
     end
 
     # Loads a cartridge from manifest for the given name.
@@ -91,7 +119,7 @@ module OpenShift
     # TODO: Caching?
     def get_cartridge(cart_name)
       begin
-        manifest_path = cart_model.get_cart_manifest_path(cart_name)
+        manifest_path = get_cart_manifest_path(cart_name)
         manifest = YAML.load_file(manifest_path)
         return OpenShift::Runtime::Cartridge.new(manifest)
       rescue => e
@@ -110,9 +138,9 @@ module OpenShift
     #
     # context: root -> gear user -> root
     # @param cart   cartridge name
-    def add_cart(cart)
-      establish_cart_model(cart)
-      cart_model.add_cart(cart)
+    def configure(cart, template_git_url)
+      load_cart_mixin(cart)
+      configure(cart, template_git_url)
     end
 
     # Remove cartridge from gear

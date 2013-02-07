@@ -13,6 +13,7 @@ module OpenShift
            # we keep this mechanism around - last 3 carts are from
            # internal repo
 
+      # TODO: rename new_sdk -> v2_sdk
       def self.is_new_sdk_app(gear_home)
         File.exists?(File.join(gear_home, '.env', MARKER))
       end
