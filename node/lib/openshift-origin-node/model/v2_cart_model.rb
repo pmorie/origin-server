@@ -82,7 +82,7 @@ module OpenShift
         populate_gear_repo(cart)
       end
 
-      do_control(cart, 'start')
+      do_control('start', cart)
       OpenShift::FrontendHttpServer.new(user.container_uuid, user.container_name, user.namespace).reload_httpd
       Openshift::Utils::Cgroups.enable_cgroups(user.uid)
     end
@@ -90,7 +90,7 @@ module OpenShift
     def remove_cart(cart)
       delete_private_endpoints(cart)
       OpenShift::Utils::Cgroups.disable_cgroups(user.uid)
-      do_control(cart, 'stop')
+      do_control('stop', cart)
 
       unlock_gear(cart) { cart_teardown(cart) }
 
@@ -99,7 +99,20 @@ module OpenShift
       OpenShift::FrontendHttpServer.new(user.container_uuid, user.container_name, user.namespace).reload_httpd
     end
 
-    def unlock_gear(cart)
+    def unlock_gear(cart_name)
+      begin
+        do_unlock_gear(cart_name)
+
+      ensure
+        do_lock_gear(cart_name)
+      end
+    end
+
+    def do_unlock_gear(cart)
+
+    end
+
+    def do_lock_gear(cart)
 
     end
 
@@ -128,7 +141,21 @@ module OpenShift
     end
 
     def cart_setup(cart)
+      process_cartridges do |gear_subdir|
+        tidy_script = File.join(@config.get('CARTRIDGE_BASE_PATH'), cart, 'bin', 'control') + ' tidy'
+          
+        next unless File.exists?(tidy_script)
 
+        begin
+          # Execute the hook in the context of the gear user
+          @logger.debug("Executing cart tidy script #{tidy_script} in gear #{@gear.uuid} as user #{user.uid}:#{user.gid}")
+          # TODO: capture return code, output?
+          Utils.oo_spawn(tidy_script, { uid: user.uid, gid: user.gid, chdir: gear_subdir, expected_exitstatus: 0, timeout: @timeout})
+          #run_as(user.uid, user.gid, tidy_script, gear_subdir, false, 0, @timeout)
+        rescue OpenShift::Utils::ShellExecutionException => e
+          @logger.warn("Cartridge tidy operation failed on gear #{@gear.uuid} for cart #{gear_dir}: #{e.message} (rc=#{e.rc})")
+        end
+      end      
     end
 
     def cart_teardown(cart)
@@ -300,10 +327,13 @@ module OpenShift
     #
     # @param  [block]  Code block to process cartridge
     # @yields [String] cartridge directory for each cartridge in gear
-    def process_cartridges
+    def process_cartridges(cart_name = nil)
       Dir[File.join(@user.homedir, "*-*")].each do |cart_dir|
         next if "app-root" == cart_dir ||
             (not File.directory? cart_dir)
+
+        next if !cart_name.nil? && cart_name != cart_dir
+
         yield cart_dir
       end
     end
