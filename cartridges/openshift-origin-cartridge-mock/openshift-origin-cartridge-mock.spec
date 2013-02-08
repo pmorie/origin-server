@@ -54,6 +54,7 @@ rm -rf %{buildroot}
 %{_sysconfdir}/openshift/cartridges/%{name}
 %{cartridgedir}/metadata/manifest.yml
 %doc %{cartridgedir}/README.md
+%config(noreplace) %{cartridgedir}/mock.conf
 
 
 %changelog

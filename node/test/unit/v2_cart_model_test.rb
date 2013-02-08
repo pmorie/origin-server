@@ -126,4 +126,56 @@ class V2CartModelTest < Test::Unit::TestCase
 
     assert_nil @model.find_open_ip(8080)
   end
+
+  # Flow control for destroy success - cartridge_teardown called for each method
+  # and unix user destroyed.
+  def test_destroy_success
+    @model.expects(:process_cartridges).multiple_yields(%w(/var/lib/openshift/0001000100010001/cartridge1), 
+                                                        %w(/var/lib/openshift/0001000100010001/cartridge2))
+    @model.expects(:cartridge_teardown).with('cartridge1')
+    @model.expects(:cartridge_teardown).with('cartridge2')
+    @container.user.expects(:destroy)
+
+    @model.destroy
+  end
+
+  # Flow control for destroy when teardown raises an error.
+  # Verifies that all teardown hooks are called, even if one raises an error,
+  # and that unix user is still destroyed.
+  def test_destroy_teardown_raises
+    @model.expects(:process_cartridges).multiple_yields(%w(/var/lib/openshift/0001000100010001/cartridge1), 
+                                                        %w(/var/lib/openshift/0001000100010001/cartridge2))
+    @model.expects(:cartridge_teardown).with('cartridge1').raises(OpenShift::Utils::ShellExecutionException.new('error'))
+    @model.expects(:cartridge_teardown).with('cartridge2')
+    @container.user.expects(:destroy)
+
+    @model.destroy
+  end
+
+  # Flow control for unlock_gear success - block is yielded to
+  # with cartridge name, do_unlock_gear and do_lock_gear bound the call.
+  def test_unlock_gear_success
+    @model.expects(:lock_files).with('mock-0.1').returns(%w(file1 file2 file3))
+    @model.expects(:do_unlock_gear).with(%w(file1 file2 file3))
+    @model.expects(:do_lock_gear).with(%w(file1 file2 file3))
+
+    params = []
+    @model.unlock_gear('mock-0.1') { |cart_name| params << cart_name }
+    
+    assert_equal 1, params.size
+    assert_equal 'mock-0.1', params[0]
+  end
+
+  # Flow control for unlock gear failure - do_lock_gear is called
+  # even when the block raises and exception.  Exception bubbles
+  # out to caller.
+  def test_unlock_gear_block_raises
+    @model.expects(:lock_files).with('mock-0.1').returns(%w(file1 file2 file3))
+    @model.expects(:do_unlock_gear).with(%w(file1 file2 file3))
+    @model.expects(:do_lock_gear).with(%w(file1 file2 file3))
+
+    assert_raise OpenShift::Utils::ShellExecutionException do 
+      @model.unlock_gear('mock-0.1') { raise OpenShift::Utils::ShellExecutionException.new('error') }
+    end
+  end
 end
