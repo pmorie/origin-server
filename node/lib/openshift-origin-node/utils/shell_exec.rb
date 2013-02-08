@@ -83,11 +83,12 @@ module OpenShift
           fork_pid = nil
           pid      = 0
           if options[:uid]
-            mcs_level, _, _ = oo_spawn("/usr/bin/oo-get-mcs-level #{options[:uid]}",
-                                    :expected_exitstatus => 0,
-                                    :timeout             => 3600)
-            cmd             = "/usr/bin/runcon -r system_r -t openshift_t -l #{mcs_level.chomp} #{command}"
+            # lazy init otherwise we end up with a cyclic require...
+            require 'openshift-origin-node/model/unix_user'
 
+            mcs_level = OpenShift::UnixUser.get_mcs_label options[:uid]
+            cmd = %Q{/usr/bin/runcon -r system_r -t openshift_t -l #{mcs_level} bash -c "#{command}"}
+            puts "cmd ==> #{cmd}"
             fork_pid = fork {
               Process::GID.change_privilege(options[:gid].to_i)
               Process::UID.change_privilege(options[:uid].to_i)
@@ -107,7 +108,7 @@ module OpenShift
             out, err  = read_results(read_stdout, read_stderr, options)
             _, status = Process.wait2 pid
 
-            exit status.exitstatus if options[:uid] && fork_pid.nil?
+            exit!(status.exitstatus) if (options[:uid] && fork_pid.nil?)
 
             if (!options[:expected_exitstatus].nil?) && (status.exitstatus != options[:expected_exitstatus])
               raise OpenShift::Utils::ShellExecutionException.new(
@@ -134,9 +135,9 @@ module OpenShift
     #   :timeout     => seconds to wait for command to finish. Default: 3600
     #   :buffer_size => how many bytes to read from pipe per iteration. Default: 32768
     def self.read_results(stdout, stderr, options)
-      out                   = ''
-      err                   = ''
-      readers               = [stdout, stderr]
+      out     = ''
+      err     = ''
+      readers = [stdout, stderr]
 
       begin
         Timeout::timeout(options[:timeout]) do
@@ -148,6 +149,7 @@ module OpenShift
               buffer = (fd == stdout) ? out : err
               begin
                 buffer << fd.readpartial(options[:buffer_size])
+                puts "buffer: #{buffer}\n" if $DEBUG
               rescue Errno::EAGAIN, Errno::EINTR
               rescue EOFError
                 readers.delete(fd)
