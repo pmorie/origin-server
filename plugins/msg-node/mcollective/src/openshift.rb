@@ -609,45 +609,48 @@ module MCollective
         cart_name = args['--cart-name']
         idle = args['--idle']
 
+        output = ""
         begin
           container = get_app_container_from_args(args)
-          container.move(cart_name, idle)
+          output = container.move(cart_name, idle)
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
           return -1, e.message
         else
-          return 0, ""
+          return 0, output
         end
       end
 
       def oo_pre_move(args)
         cart_name = args['--cart-name']
 
+        output = ""
         begin
           container = get_app_container_from_args(args)
-          container.pre_move(cart_name)
+          output = container.pre_move(cart_name)
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
           return -1, e.message
         else
-          return 0, ""
+          return 0, output
         end
       end
 
       def oo_post_move(args)
         cart_name = args['--cart-name']
 
+        output = ""
         begin
           container = get_app_container_from_args(args)
-          container.post_move(cart_name)
+          output = container.post_move(cart_name)
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
           return -1, e.message
         else
-          return 0, ""
+          return 0, output
         end
       end
 
@@ -729,6 +732,7 @@ module MCollective
       def oo_status(args)
         cart_name = args['--cart-name']
 
+        output = ""
         begin
           container = get_app_container_from_args(args)
           output = container.status(cart_name)
@@ -744,6 +748,7 @@ module MCollective
       def oo_threaddump(args)
         cart_name = args['--cart-name']
 
+        output = ""
         begin
           container = get_app_container_from_args(args)
           output = container.threaddump(cart_name)
