@@ -341,7 +341,6 @@ module MCollective
         container_uuid = args['--with-container-uuid']
         app_uuid = args['--with-app-uuid']
         
-        output = ""
         begin
           container = get_app_container_from_args(args)
           container.force_stop
@@ -350,7 +349,7 @@ module MCollective
           Log.instance.info e.backtrace
           return -1, e.message
         else
-          return 0, output
+          return 0, ""
         end
       end
 
@@ -414,7 +413,6 @@ module MCollective
         passphrase    = args['--with-passphrase']
         server_alias  = args['--with-alias-name']
 
-        output = ""
         begin
           frontend = OpenShift::FrontendHttpServer.new(container_uuid,
                                                        container_name, namespace)
@@ -427,7 +425,7 @@ module MCollective
           Log.instance.info e.backtrace
           return -1, e.message
         else
-          return 0, output
+          return 0, ""
         end
       end
 
@@ -438,7 +436,6 @@ module MCollective
 
         server_alias  = args['--with-alias-name']
 
-        output = ""
         begin
           frontend = OpenShift::FrontendHttpServer.new(container_uuid,
                                                        container_name, namespace)
@@ -448,7 +445,7 @@ module MCollective
           Log.instance.info e.backtrace
           return -1, e.message
         else
-          return 0, output
+          return 0, ""
         end
       end
 
@@ -749,13 +746,13 @@ module MCollective
 
         begin
           container = get_app_container_from_args(args)
-          container.threaddump(cart_name)
+          output = container.threaddump(cart_name)
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
           return -1, e.message
         else
-          return 0, ""
+          return 0, output
         end
       end
 
