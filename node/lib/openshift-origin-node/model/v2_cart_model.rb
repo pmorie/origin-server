@@ -1,6 +1,7 @@
 require 'rubygems'
 require 'openshift-origin-node/model/unix_user'
 require 'openshift-origin-node/utils/shell_exec'
+require 'openshift-origin-node/utils/cgroups'
 
 module OpenShift
   class V2CartridgeModel
@@ -52,20 +53,83 @@ module OpenShift
       end
     end
 
-    def add_cart(cart)
-      OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
+    def configure(cart_name, template_git_url)
+      OpenShift::Utils::Sdk.mark_new_sdk_app(user.homedir)
+      OpenShift::Utils::Cgroups.disable_cgroups(user.uid)
+      create_private_endpoints(cart)
+      create_standard_env_vars(cart)
+      create_cart_directory(cart)
+      create_gear_repo(cart)
+      process_erb_templates(cart)
 
-      # Disable cgroups
-      # Acquire IP and expose
-      # Create standard env vars
-      # Create initial cart directory
-      # Setup gear git repo (add to unix user?)
-      # Populate gear git repo if cartridge provides template.
-      # Process cart ERB templates (still necessary?)
+      unlock_gear(cart) do
+        cart_setup(cart) 
+        populate_gear_repo(cart, template_git_url)
+      end
+
+      do_control('start', cart)
+      OpenShift::FrontendHttpServer.new(user.container_uuid, user.container_name, user.namespace).reload_httpd
+      Openshift::Utils::Cgroups.enable_cgroups(user.uid)
+    end
+
+    def deconfigure(cart_name)
+      delete_private_endpoints(cart)
+      OpenShift::Utils::Cgroups.disable_cgroups(user.uid)
+      do_control('stop', cart)
+
+      unlock_gear(cart) { cart_teardown(cart) }
+
+      delete_cart_directory(cart)
+      Openshift::Utils::Cgroups.enable_cgroups(user.uid)
+      OpenShift::FrontendHttpServer.new(user.container_uuid, user.container_name, user.namespace).reload_httpd
+    end
+
+    def unlock_gear(cart_name)
+      begin
+        do_unlock_gear(cart_name)
+        yield
+      ensure
+        do_lock_gear(cart_name)
+      end
+    end
+
+    def do_unlock_gear(cart_name)
+
+    end
+
+    def do_lock_gear(cart_name)
+
+    end
+
+    def create_standard_env_vars(cart_name)
+
+    end
+
+    def create_cart_directory(cart_name)
+
+    end
+
+    def delete_cart_directory(cart_name)
+
+    end
+
+    def create_gear_repo(cart_name)
+
+    end
+
+    def populate_gear_repo(cart_name, template_git_url)
+
+    end
+
+    def process_erb_templates(cart_name)
+
+    end
+
+    def cart_setup(cart_name)
       
     end
 
-    def remove_cart(cart)
+    def cart_teardown(cart_name)
 
     end
 
@@ -181,10 +245,13 @@ module OpenShift
     #
     # @param  [block]  Code block to process cartridge
     # @yields [String] cartridge directory for each cartridge in gear
-    def process_cartridges
+    def process_cartridges(cart_name = nil)
       Dir[File.join(@user.homedir, "*-*")].each do |cart_dir|
         next if "app-root" == cart_dir ||
             (not File.directory? cart_dir)
+
+        next if !cart_name.nil? && cart_name != cart_dir
+
         yield cart_dir
       end
     end
