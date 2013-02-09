@@ -27,6 +27,13 @@ module OpenShift
         load("/etc/openshift/env", File.join(gear_dir, '.env'), File.join(gear_dir, '*', 'env'))
       end
 
+      # @param [String] cartridge_dir       Home directory of the gear
+      # @return [Hash<String,String>]  hash[Environment Variable] = Value
+      def self.for_cartridge(cartridge_dir)
+        gear_dir = Pathname.new(cartridge_dir).parent.to_path
+        load("/etc/openshift/env", File.join(gear_dir, '.env'), File.join(cartridge_dir, '*', 'env'))
+      end
+
       # Read a Gear's + n number cartridge environment variables into a environ(7) hash
       # @param [String]               env_dir of gear to be read
       # @return [Hash<String,String>] environment variable name: value
