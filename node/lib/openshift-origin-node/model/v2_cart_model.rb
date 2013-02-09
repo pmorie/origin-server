@@ -1,7 +1,11 @@
 require 'rubygems'
+require 'logger'
 require 'openshift-origin-node/model/unix_user'
+require 'openshift-origin-node/model/application_repository'
 require 'openshift-origin-node/utils/shell_exec'
 require 'openshift-origin-node/utils/cgroups'
+require 'openshift-origin-node/utils/sdk'
+require 'openshift-origin-node/utils/environ'
 
 module OpenShift
   class V2CartridgeModel
@@ -59,7 +63,7 @@ module OpenShift
       end
     end
 
-    # configure(cartridge_name, template_git_url)
+    # configure(cartridge_name, template_git_url) -> stdout
     #
     # Add a cartridge to a gear
     #
@@ -80,9 +84,10 @@ module OpenShift
       # I thought this was moving into unix_user#initialize_homedir
       create_gear_repo(cartridge_name)
 
+      buffer = ''
       Dir.chdir(@user.homedir) do
         unlock_gear(cartridge_name) do |c|
-          cartridge_setup(c)
+          buffer << cartridge_setup(c)
           populate_gear_repo(c, template_git_url)
         end
       end
@@ -90,8 +95,9 @@ module OpenShift
       process_erb_templates(cartridge_name)
 
       do_control('start', cartridge_name)
-      OpenShift::FrontendHttpServer.new(user.container_uuid, user.container_name, user.namespace).reload_httpd
-      Openshift::Utils::Cgroups.enable_cgroups(user.uid)
+      OpenShift::FrontendHttpServer.new(@user.container_uuid, @user.container_name, @user.namespace).reload_httpd
+      OpenShift::Utils::Cgroups.enable_cgroups(@user.uid)
+      buffer
     end
 
     # deconfigure(cartridge_name) -> nil
@@ -107,7 +113,7 @@ module OpenShift
       unlock_gear(cartridge_name) { |c| cartridge_teardown(c) }
 
       delete_cartridge_directory(cartridge_name)
-      Openshift::Utils::Cgroups.enable_cgroups(user.uid)
+      OpenShift::Utils::Cgroups.enable_cgroups(user.uid)
       OpenShift::FrontendHttpServer.new(user.container_uuid, user.container_name, user.namespace).reload_httpd
       nil
     end
@@ -134,8 +140,8 @@ module OpenShift
     #
     #   v2_cart_model.lock_files("php-5.3")
     def lock_files(cartridge_name)
-      locked_files = File.join(cartridge_name, %W{metadata locked_files.txt})
-      return Arrary.new unless File.exist? locked_files
+      locked_files = File.join(cartridge_name, 'metadata', 'locked_files.txt')
+      return Array.new unless File.exist? locked_files
 
       files = Array.new
       File.readlines(locked_files).each do |line|
@@ -169,11 +175,7 @@ module OpenShift
         # It is expensive doing one file at a time but...
         # ...it allows reporting on the failed command at the file level
         # ...we don't have to worry about the length of argv
-        Utils.oo_spawn(
-            "chown --reference #{@user.homedir} #{entry};
-             chcon --reference #{@user.homedir} #{entry}",
-            expected_exitstatus: 0
-        )
+        UnixUser.match_ownership(@user.homedir, entry)
       end
       nil
     end
@@ -208,8 +210,12 @@ module OpenShift
     #   v2_cart_model.create_cartridge_directory('php-5.3')
     def create_cartridge_directory(cartridge_name)
       base = File.join(@config.get('CARTRIDGE_BASE_PATH'), 'v2', cartridge_name)
-      Utils.oo_spawn("/bin/cp -ad #{base} #{@user.homedir}",
+      Utils.oo_spawn("/bin/cp -ad #{base} .",
+                     chdir:               @user.homedir,
                      expected_exitstatus: 0)
+      Utils.oo_spawn(
+          "chcon -R --reference=#{@user.homedir} #{File.join(@user.homedir, cartridge_name)}",
+          expected_exitstatus: 0)
       nil
     end
 
@@ -221,33 +227,11 @@ module OpenShift
     end
 
     def populate_gear_repo(cartridge_name, template_git_url = nil)
+      repo = ApplicationRepository.new(@user)
       if template_git_url.nil?
-
-        cartridge_template = File.join(@user.homedir, cartridge_name, 'template')
-        return if File.file?(cartridge_template)
-
-        template  = File.join(@user.homedir, 'git', 'template')
-        application = File.join(@user.homedir, 'git', "#{@user.app_name}.git")
-
-        FileUtils.cp_r(cartridge_template, File.join(@user.homdir, 'git'))
-        Utils.oo_spawn(%Q{git init;
-                          git add -f .;
-                          git config user.email "builder@example.com";
-                          git commit -m "Creating template"; },
-                       chdir:               template,
-                       expected_exitstatus: 0)
-        Utils.oo_spawn(%Q{git clone --bare --no-hardlinks template #{@user.app_name}.git;
-                        cd #{@user.app_name}.git;
-                        git repack;},
-                       uid:                 @user.uid,
-                       chdir:               application,
-                       expected_exitstatus: 0)
-        File.rm_r(template)
-
-        File.open(File.join(application, 'description'), 'w') {|f|
-          f.write("#{cartridge_name} application #{@user.app_name}")
-        }
-
+        repo.populate_from_cartridge(cartridge_name)
+      else
+        raise NotImplementedError('populating repo from URL unsupported')
       end
     end
 
@@ -273,19 +257,25 @@ module OpenShift
       gear_env = Utils::Environ.load('/etc/openshift/env',
                                      File.join(@user.homedir, '.env'))
 
-      cartridge_home = File.join(@user.homedir, cartridge_name)
-      render_erbs(gear_env, File.join(cartridge_home, 'env'))
+      cartridge_home     = File.join(@user.homedir, cartridge_name)
+      cartridge_env_home = File.join(cartridge_home, 'env')
 
-      setup = Files.join(cartridge_home, %W{bin setup})
+      cartridge_env = gear_env.merge(Utils::Environ.load(cartridge_env_home))
+      render_erbs(cartridge_env, cartridge_env_home)
+      cartridge_env = gear_env.merge(Utils::Environ.load(cartridge_env_home))
+
+      setup = File.join(cartridge_home, 'bin', 'setup')
       setup << "--version=#{version}" if version
 
-      cartridge_env = gear_env.merge(Utils::Environ.load(File.join(cartridge_home, 'env')))
-      out, _, _     = Utils.oo_spawn(setup,
-                                     env:             cartridge_env,
-                                     unsetenv_others: true,
-                                     chdir:           @user.homedir,
-                                     uid:             @user.uid,
-                                     expected_status: 0)
+      out, err, rc = Utils.oo_spawn(setup,
+                                    env:             cartridge_env,
+                                    unsetenv_others: true,
+                                    chdir:           @user.homedir,
+                                    uid:             @user.uid)
+
+      raise OpenShift::ShellExecutionException.new(
+                "Failed to execute: #{setup} for #{@user.uuid} in #{@user.homedir}",
+                rc, out, err) unless 0 == rc
       @logger.info("Setup #{cartridge_name} for user #{@user.uuid} in #{cartridge_home}")
       out
     end
@@ -300,7 +290,7 @@ module OpenShift
       path_glob << '/*.erb'
       Dir.glob(path_glob).select { |f| File.file?(f) }.each do |file|
         # FIXME: need to determine path to correct erb. oo-ruby?
-        Utils.oo_spawn("erb -S 2 -- #{file} >#{file.chomp('.erb')}",
+        Utils.oo_spawn(%Q{erb -S 2 -- #{file} >#{file.chomp('.erb')}},
                        env:             env,
                        unsetenv_others: true,
                        chdir:           @user.homedir,
@@ -320,7 +310,7 @@ module OpenShift
     def cartridge_teardown(cartridge_name)
       cartridge_home = File.join(@user.homedir, cartridge_name)
       env            = Utils::Environ.for_cartridge(cartridge_home)
-      teardown       = Files.join(cartridge_home, %W{bin teardown})
+      teardown       = File.join(cartridge_home, 'bin', 'teardown')
 
       # FIXME: Will anyone retry if this reports error, or should we remove from disk no matter what?
       out, _, _      = Utils.oo_spawn(teardown,
@@ -463,24 +453,29 @@ module OpenShift
     # Execute action using each cartridge's control script in gear
     def do_control(action, cartridge_name=nil)
       buffer       = ''
-      gear_env     = Utils::Environ.load('/etc/openshift/env', File.join(user.homedir, '.env'))
-      action_hooks = File.join(user.homedir, %w{app-root runtime repo .openshift action_hooks})
+      gear_env     = Utils::Environ.load('/etc/openshift/env', File.join(@user.homedir, '.env'))
+      action_hooks = File.join(@user.homedir, %w{app-root runtime repo .openshift action_hooks})
 
       pre_action = File.join(action_hooks, "pre_#{action}")
       if File.executable?(pre_action)
-        out, _, _ = Utils.oo_spawn(pre_action,
-                                   env:                 gear_env,
-                                   unsetenv_others:     true,
-                                   chdir:               user.homedir,
-                                   expected_exitstatus: 0)
+        out, err, rc = Utils.oo_spawn(pre_action,
+                                      env:             gear_env,
+                                      unsetenv_others: true,
+                                      chdir:           @user.homedir,
+                                      uid:             @user.uid)
         buffer << out
+        raise ShellExecutionException.new(
+                  "Failed to execute: '#{pre_action}' for #{@user.uuid} application #{@user.app_name}",
+                  rc, buffer, err
+              ) if rc != 0
       end
 
-      @cart_model.process_cartridges(cartridge_name) { |path|
-        cartridge_env = gear_env.merge(Utils::Environ.load(File.join(path, "env")))
+      process_cartridges(cartridge_name) { |path|
+        cartridge_env = gear_env.merge(Utils::Environ.load(File.join(path, 'env')))
 
-        control = Files.join(path, %w{bin control})
+        control = File.join(path, 'bin', 'control')
         unless File.executable? control
+          # TODO: This may not be an error for plugin cartridges...
           raise "Corrupt cartridge: #{control} must exist and be executable"
         end
 
@@ -488,27 +483,35 @@ module OpenShift
         pre_action  = File.join(action_hooks, "pre_#{action}_#{cartridge}")
         post_action = File.join(action_hooks, "post_#{action}_#{cartridge}")
 
-        command = ''
+        command = 'set -e;'
         command << "source #{pre_action};  " if File.exist? pre_action
         command << "#{control} #{action}   "
         command << "; source #{post_action}" if File.exist? post_action
 
-        out, _, _ = Utils.oo_spawn(command,
-                                   env:                 cartridge_env,
-                                   unsetenv_others:     true,
-                                   chdir:               user.homedir,
-                                   expected_exitstatus: 0)
+        out, err, rc = Utils.oo_spawn(command,
+                                      env:             cartridge_env,
+                                      unsetenv_others: true,
+                                      chdir:           @user.homedir,
+                                      uid:             @user.uid)
         buffer << out
+
+        raise ShellExecutionException.new(
+                  "Failed to execute: 'control #{action}' for #{path}", rc, buffer, err
+              ) if rc != 0
       }
 
       post_action = File.join(action_hooks, "post_#{action}")
       if File.executable?(post_action)
-        out, _, _ = Utils.oo_spawn(post_action,
-                                   env:                 gear_env,
-                                   unsetenv_others:     true,
-                                   chdir:               user.homedir,
-                                   expected_exitstatus: 0)
+        out, err, rc = Utils.oo_spawn(post_action,
+                                      env:             gear_env,
+                                      unsetenv_others: true,
+                                      chdir:           @user.homedir,
+                                      uid:             @user.uid)
         buffer << out
+        raise ShellExecutionException.new(
+                  "Failed to execute: '#{post_action}' for #{@user.uuid} application #{@user.app_name}",
+                  rc, buffer, err
+              ) if rc != 0
       end
       buffer
     end
