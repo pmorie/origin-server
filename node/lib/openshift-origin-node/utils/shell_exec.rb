@@ -135,9 +135,9 @@ module OpenShift
     #   :timeout     => seconds to wait for command to finish. Default: 3600
     #   :buffer_size => how many bytes to read from pipe per iteration. Default: 32768
     def self.read_results(stdout, stderr, options)
-      out                   = ''
-      err                   = ''
-      readers               = [stdout, stderr]
+      out     = ''
+      err     = ''
+      readers = [stdout, stderr]
 
       begin
         Timeout::timeout(options[:timeout]) do
@@ -149,7 +149,7 @@ module OpenShift
               buffer = (fd == stdout) ? out : err
               begin
                 buffer << fd.readpartial(options[:buffer_size])
-                  puts "buffer: #{buffer}\n"
+                puts "buffer: #{buffer}\n" if $DEBUG
               rescue Errno::EAGAIN, Errno::EINTR
               rescue EOFError
                 readers.delete(fd)
