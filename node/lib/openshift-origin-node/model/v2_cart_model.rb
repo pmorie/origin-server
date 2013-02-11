@@ -26,7 +26,9 @@ module OpenShift
 
     # destroy() -> nil
     #
-    # remove all cartridges from a gear and delete the gear
+    # Remove all cartridges from a gear and delete the gear.  Accepts
+    # and discards any parameters to comply with the signature of V1 
+    # require, which accepted a single argument.
     #
     # destroy()
     def destroy(*)
