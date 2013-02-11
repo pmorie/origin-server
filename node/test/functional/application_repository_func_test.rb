@@ -15,13 +15,14 @@
 #++
 
 require_relative '../../lib/openshift-origin-node/model/application_repository'
+require 'pathname'
 require 'test/unit'
 require 'mocha'
 
 class ApplicationRepositoryFuncTest < Test::Unit::TestCase
   User = Struct.new(:homedir, :uid, :app_name)
 
-  # FIXME: I cannot get assert_path_exist method to resolve. :-(
+  # FIXME: I cannot get assert_path_exist method to resolve/bind. :-(
   def assert_path_exist(path, message=nil)
     failure_message = build_message(message,
                                     "<?> expected to exist",
@@ -29,6 +30,37 @@ class ApplicationRepositoryFuncTest < Test::Unit::TestCase
     assert_block(failure_message) do
       File.exist?(path)
     end
+  end
+
+  def refute_path_exist(path, message=nil)
+    failure_message = build_message(message,
+                                    "<?> expected to not exist",
+                                    path)
+    assert_block(failure_message) do
+      not File.exist?(path)
+    end
+  end
+
+
+  def assert_application_repository(repo)
+    assert_path_exist repo.path
+    assert_path_exist File.join(repo.path, 'description')
+    assert_path_exist File.join(@user.homedir, '.gitconfig')
+    assert_path_exist File.join(repo.path, 'hooks', 'pre-receive')
+    assert_path_exist File.join(repo.path, 'hooks', 'post-receive')
+
+    files = Dir[repo.path + '/objects/**/*']
+    assert files.count > 0, 'Error: Git repository missing objects'
+    files.each { |f|
+      stat = File.stat(f)
+      assert_equal @user.uid, stat.uid, 'Error: Git object wrong ownership'
+    }
+
+    stat = File.stat(File.join(repo.path, 'hooks'))
+    assert_equal 0, stat.uid, 'Error: Git hook directory not owned by root'
+
+    stat = File.stat(File.join(repo.path, 'hooks', 'post-receive'))
+    assert_equal 0, stat.uid, 'Error: Git hook post-receive not owned by root'
   end
 
   # Called before every test method runs. Can be used
@@ -43,6 +75,72 @@ class ApplicationRepositoryFuncTest < Test::Unit::TestCase
     File.chown(@user.uid, @user.uid, @user.homedir)
     `chcon -R -r object_r -t openshift_var_lib_t -l s0:c0,c#{@user.uid} #{@user.homedir}`
 
+    @config = mock('OpenShift::Config')
+    @config.stubs(:get).with("BROKER_HOST").returns("localhost")
+    OpenShift::Config.stubs(:new).returns(@config)
+  end
+
+  # Called after every test method runs. Can be used to tear
+  # down fixture information.
+  def teardown
+    FileUtils.rm_rf(@user.homedir)
+  end
+
+  def test_new
+    repo = OpenShift::ApplicationRepository.new(@user)
+    refute_nil repo
+  end
+
+  def test_pull_bare_repository
+    create_template
+    create_bare
+    cartridge_template_git = File.join(@user.homedir, @cartridge_name, 'template.git')
+    assert_path_exist cartridge_template_git
+    refute_path_exist File.join(@user.homedir, @cartridge_name, 'template')
+
+    expected_path = File.join(@user.homedir, 'git', @user.app_name + '.git')
+
+    repo = OpenShift::ApplicationRepository.new(@user)
+
+    begin
+      repo.populate_from_cartridge(@cartridge_name)
+    rescue OpenShift::Utils::ShellExecutionException => e
+      puts %Q{
+        Failed to create git repo from cartridge template: rc(#{e.rc})
+        stdout ==> #{e.stdout}
+        stderr ==> #{e.stderr}
+           #{e.backtrace.join("\n")}}
+      raise
+    end
+
+    assert_equal expected_path, repo.path
+    assert_application_repository(repo)
+  end
+
+  def pull_directory
+    create_template
+    expected_path = File.join(@user.homedir, 'git', @user.app_name + '.git')
+    refute_path_exist(expected_path)
+    refute_path_exist File.join(@user.homedir, @cartridge_name, 'template.git')
+
+    repo = OpenShift::ApplicationRepository.new(@user)
+
+    begin
+      repo.populate_from_cartridge(@cartridge_name)
+    rescue OpenShift::Utils::ShellExecutionException => e
+      puts %Q{
+        Failed to create git repo from cartridge template: rc(#{e.rc})
+        stdout ==> #{e.stdout}
+        stderr ==> #{e.stderr}
+           #{e.backtrace.join("\n")}}
+      raise
+    end
+
+    assert_equal expected_path, repo.path
+    assert_application_repository(repo)
+  end
+
+  def create_template
     # Cartridge Author tasks...
     perl = File.join(@user.homedir, @cartridge_name, 'template', 'perl')
     FileUtils.mkpath(perl)
@@ -70,60 +168,24 @@ print <<EOF
 EOF
 })
     }
-
-    @config = mock('OpenShift::Config')
-    @config.stubs(:get).with("BROKER_HOST").returns("localhost")
-    OpenShift::Config.stubs(:new).returns(@config)
   end
 
-  # Called after every test method runs. Can be used to tear
-  # down fixture information.
+  def create_bare
+    template = File.join(@user.homedir, @cartridge_name, 'template')
+    Dir.chdir(Pathname.new(template).parent.to_path) do
+    output = %x{set -xe;
+pushd #{template}
+git init;
+git config user.email "mocker@example.com";
+git config user.name "Mock Template builder";
+git add -f .;
+git </dev/null commit -a -m "Creating mocking template" 2>&1;
+popd;
+git </dev/null clone --bare --no-hardlinks template template.git 2>&1;
+}
+    #puts "\ncreate_bare: #{output}"
 
-  def teardown
-    FileUtils.rm_rf(@user.homedir)
-  end
-
-  def test_new
-    repo = OpenShift::ApplicationRepository.new(@user)
-    refute_nil repo
-  end
-
-  def test_populate_from_cartridge
-    expected_path = File.join(@user.homedir, 'git', @user.app_name + '.git')
-    refute File.exist?(expected_path), 'Error: target git repository already exists'
-
-    repo          = OpenShift::ApplicationRepository.new(@user)
-
-    begin
-      repo.populate_from_cartridge(@cartridge_name)
-    rescue OpenShift::Utils::ShellExecutionException => e
-      puts %Q{
-        Failed to create git repo from cartridge template: rc(#{e.rc})
-        stdout ==> #{e.stdout}
-        stderr ==> #{e.stderr}
-           #{e.backtrace.join("\n")}}
-      raise
-    end
-
-    assert_equal expected_path, repo.path
-
-    assert_path_exist repo.path
-    assert_path_exist File.join(repo.path, 'description')
-    assert_path_exist File.join(@user.homedir, '.gitconfig')
-    assert_path_exist File.join(repo.path, 'hooks', 'pre-receive')
-    assert_path_exist File.join(repo.path, 'hooks', 'post-receive')
-
-    files = Dir[repo.path + '/objects/**/*']
-    assert files.count > 0, 'Error: Git repository missing objects'
-    files.each { |f|
-      stat = File.stat(f)
-      assert_equal @user.uid, stat.uid, 'Error: Git object wrong ownership'
-    }
-
-    stat = File.stat(File.join(repo.path, 'hooks'))
-    assert_equal 0, stat.uid, 'Error: Git hook directory not owned by root'
-
-    stat = File.stat(File.join(repo.path, 'hooks', 'post-receive'))
-    assert_equal 0, stat.uid, 'Error: Git hook post-receive not owned by root'
+    FileUtils.rm_r(template)
+      end
   end
 end

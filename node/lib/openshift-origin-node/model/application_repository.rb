@@ -20,30 +20,46 @@ require_relative '../../openshift-origin-node/utils/shell_exec'
 require_relative '../../openshift-origin-node/model/unix_user'
 
 module OpenShift
+
+  ##
+  # This class represents an Application's Git repository
+
   class ApplicationRepository
     include OpenShift::Utils
 
     attr_reader :path
 
+    ##
+    # Creates a new application Git repository from a template
+    #
+    # +user+ is of type +UnixUser+
     def initialize(user)
       @user   = user
       @path   = File.join(@user.homedir, 'git', "#{@user.app_name}.git")
       @config = OpenShift::Config.new
     end
 
-
+    ##
+    # +populate_from_cartridge+ uses the provided +cartridge_name+ to install a template application
+    # for the gear
+    #
+    # If the directory +template+ exists it will be installed in the application's repository.
+    # If the directory +template.git+ exists it will be cloned as the application's repository.
+    #
     def populate_from_cartridge(cartridge_name)
-      cartridge_template = File.join(@user.homedir, cartridge_name, 'template')
+      cartridge_template     = File.join(@user.homedir, cartridge_name, 'template')
+      cartridge_template_git = File.join(@user.homedir, cartridge_name, 'template.git')
+
+      have_template = (File.exist? cartridge_template or File.exist? cartridge_template_git)
 
       raise ArgumentError.new(
-                "Application template #{File.join(cartridge_name, 'template')} is missing"
-            ) if not File.exist? cartridge_template
+                "No template for application git repository found"
+            ) unless have_template
 
       # TODO: Support tar balls etc...
       raise NotImplementedError.new(
-                "#{File.join(cartridge_name, 'template')}: is a file"
+                "#{File.join(cartridge_name, 'template')}: files are not support for initializing a git repository"
             ) if File.file? cartridge_template
-
 
       # expose variables for ERB processing
       @application_name = @user.app_name
@@ -52,15 +68,33 @@ module OpenShift
       # FIXME: See below
       @broker_host      = @config.get('BROKER_HOST')
 
+      case
+        when File.exists?(cartridge_template)
+          pull_directory(cartridge_template)
+        when File.exist?(cartridge_template_git)
+          pull_bare_repository(cartridge_template_git)
+      end
+      configure_repository
+    end
+
+    ##
+    # Copy bare git repository to be used as application repository
+    def pull_bare_repository(path)
+      FileUtils.cp_r(path, @path)
+    end
+
+    ##
+    # Copy a file tree structure and build an application repository
+    def pull_directory(path)
       template = File.join(@user.homedir, 'git', 'template')
       FileUtils.rm_r(template) if File.exist? template
 
       git_path = File.join(@user.homedir, 'git')
-      FileUtils.cp_r(cartridge_template, git_path)
+      FileUtils.cp_r(path, git_path)
+
       Utils.oo_spawn(ERB.new(GIT_INIT).result(binding),
                      chdir:               template,
                      expected_exitstatus: 0)
-
       begin
         # trying to clone as the user proved to be painful as git managed to "loose" the selinux context
         Utils.oo_spawn(ERB.new(GIT_LOCAL_CLONE).result(binding),
@@ -73,24 +107,30 @@ module OpenShift
                   'Failed to clone application git repository from template repository',
                   e.rc, e.stdout, e.stderr)
       else
-        UnixUser.match_ownership(@user.homedir, @path)
-
-        # application developer cannot change git hooks
-        hooks = File.join(@path, 'hooks')
-        FileUtils.chown_R(0, 0, hooks)
-
-        render_file = lambda { |f, m, t|
-          File.open(f, 'w', m) { |f| f.write(ERB.new(t).result(binding)) }
-        }
-
-        render_file.call(File.join(@path, 'description'), 0644, GIT_DESCRIPTION)
-        render_file.call(File.join(@user.homedir, '.gitconfig'), 0644, GIT_CONFIG)
-
-        render_file.call(File.join(hooks, 'pre-receive'), 0755, PRE_RECEIVE)
-        render_file.call(File.join(hooks, 'post-receive'), 0755, POST_RECEIVE)
+        configure_repository()
       ensure
         FileUtils.rm_r(template)
       end
+    end
+
+    ##
+    # Install Git repository hooks and set permissions
+    def configure_repository
+      UnixUser.match_ownership(@user.homedir, @path)
+
+      # application developer cannot change git hooks
+      hooks = File.join(@path, 'hooks')
+      FileUtils.chown_R(0, 0, hooks)
+
+      render_file = lambda { |f, m, t|
+        File.open(f, 'w', m) { |f| f.write(ERB.new(t).result(binding)) }
+      }
+
+      render_file.call(File.join(@path, 'description'), 0644, GIT_DESCRIPTION)
+      render_file.call(File.join(@user.homedir, '.gitconfig'), 0644, GIT_CONFIG)
+
+      render_file.call(File.join(hooks, 'pre-receive'), 0755, PRE_RECEIVE)
+      render_file.call(File.join(hooks, 'post-receive'), 0755, POST_RECEIVE)
     end
 
     private
