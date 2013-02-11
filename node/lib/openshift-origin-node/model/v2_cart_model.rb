@@ -67,33 +67,26 @@ module OpenShift
     # configure('php-5.3', 'git://...')
     def configure(cartridge_name, template_git_url = nil)
       OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
-      OpenShift::Utils::Cgroups.disable_cgroups(@user.uid)
-      create_standard_env_vars(cartridge_name)
-      create_cartridge_directory(cartridge_name)
+      output = ''
+      OpenShift::Utils::Cgroups::with_cgroups_disabled(user.uuid) do
+        create_cartridge_directory(cartridge_name)
+        create_standard_env_vars(cartridge_name)
+        create_private_endpoints(cartridge_name)
 
-      # TODO: remove comment
-      # If this is where the IP addresses are assigned to the cartridge it cannot happen until the
-      #   the cartridge directory exists so OPENSHIFT_{CART_NS}_IP can be created
-      create_private_endpoints(cartridge_name)
-
-      # TODO: remove comment
-      # I thought this was moving into unix_user#initialize_homedir
-      create_gear_repo(cartridge_name)
-
-      buffer = ''
-      Dir.chdir(@user.homedir) do
-        unlock_gear(cartridge_name) do |c|
-          buffer << cartridge_setup(c)
-          populate_gear_repo(c, template_git_url)
+        Dir.chdir(@user.homedir) do
+          unlock_gear(cartridge_name) do |c|
+            output << cartridge_setup(c)
+            populate_gear_repo(c, template_git_url)
+          end
         end
+
+        process_erb_templates(cartridge_name)
+
+        do_control('start', cartridge_name)
+        OpenShift::FrontendHttpServer.new(@user.container_uuid, @user.container_name, @user.namespace).reload_httpd
       end
 
-      process_erb_templates(cartridge_name)
-
-      do_control('start', cartridge_name)
-      OpenShift::FrontendHttpServer.new(@user.container_uuid, @user.container_name, @user.namespace).reload_httpd
-      OpenShift::Utils::Cgroups.enable_cgroups(@user.uid)
-      buffer
+      output
     end
 
     # deconfigure(cartridge_name) -> nil
@@ -103,14 +96,14 @@ module OpenShift
     # deconfigure('php-5.3')
     def deconfigure(cartridge_name)
       delete_private_endpoints(cartridge_name)
-      OpenShift::Utils::Cgroups.disable_cgroups(user.uid)
+      OpenShift::Utils::Cgroups::with_cgroups_disabled(user.uuid) do
+        do_control('stop', cartridge_name)
+        unlock_gear(cartridge_name) { |c| cartridge_teardown(c) }
+        delete_cartridge_directory(cartridge_name)
+      end
 
-      do_control('stop', cartridge_name)
-      unlock_gear(cartridge_name) { |c| cartridge_teardown(c) }
-
-      delete_cartridge_directory(cartridge_name)
-      OpenShift::Utils::Cgroups.enable_cgroups(user.uid)
       OpenShift::FrontendHttpServer.new(user.container_uuid, user.container_name, user.namespace).reload_httpd
+
       nil
     end
 
@@ -196,6 +189,10 @@ module OpenShift
     end
 
     def create_standard_env_vars(cart_name)
+    # TODO: determine which env vars to create
+    #  LOG_DIR
+    #  add bin directory to PATH
+
 
     end
 
@@ -217,9 +214,6 @@ module OpenShift
 
     def delete_cartridge_directory(cartridge_name)
       File.rm_r(File.join(@user.homedir, cartridge_name))
-    end
-
-    def create_gear_repo(cart_name)
     end
 
     def populate_gear_repo(cartridge_name, template_git_url = nil)
