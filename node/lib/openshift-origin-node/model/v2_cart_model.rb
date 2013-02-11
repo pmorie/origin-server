@@ -31,13 +31,13 @@ module OpenShift
     # destroy()
     def destroy(*)
       cartridge_name = 'N/A'
-      begin
-        process_cartridges do |path|
+      process_cartridges do |path|
+        begin
           cartridge_name = File.basename(path)
-          cartridge_teardown(path)
+          cartridge_teardown(cartridge_name)
+        rescue Utils::ShellExecutionException => e
+          @logger.warn("Cartridge teardown operation failed on gear #{@gear.uuid} for cartridge #{cartridge_name}: #{e.message} (rc=#{e.rc})")
         end
-      rescue Utils::ShellExecutionException => e
-        @logger.warn("Cartridge teardown operation failed on gear #{@gear.uuid} for cartridge #{cartridge_name}: #{e.message} (rc=#{e.rc})")
       end
 
       # Ensure we're not in the gear's directory
@@ -52,12 +52,8 @@ module OpenShift
     #
     # tidy()
     def tidy
-      cartridge_name = 'N/A'
       begin
-        process_cartridges do |path|
-          cartridge_name = File.basename(path)
-          do_control('tidy')
-        end
+        do_control('tidy')
       rescue OpenShift::Utils::ShellExecutionException => e
         @logger.warn("Cartridge tidy operation failed on gear #{@gear.uuid} for cart #{cartridge_name}: #{e.message} (rc=#{e.rc})")
       end
@@ -273,7 +269,7 @@ module OpenShift
                                     chdir:           @user.homedir,
                                     uid:             @user.uid)
 
-      raise OpenShift::ShellExecutionException.new(
+      raise OpenShift::Utils::ShellExecutionException.new(
                 "Failed to execute: #{setup} for #{@user.uuid} in #{@user.homedir}",
                 rc, out, err) unless 0 == rc
       @logger.info("Setup #{cartridge_name} for user #{@user.uuid} in #{cartridge_home}")
