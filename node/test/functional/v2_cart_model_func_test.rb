@@ -27,6 +27,10 @@ class V2CartModelFuncTest < Test::Unit::TestCase
   # Called before every test method runs. Can be used
   # to set up fixture information.
   def setup
+    skip "run_as tests require root permissions"  if 0 != Process.uid
+    File.chmod(0777, 'test/coverage')
+
+    # TODO: is this a safe uid?
     @uid            = 501
     @uuid           = `uuidgen -r |sed -e s/-//g`.chomp
     @cartridge_name = 'mock-0.0'
@@ -74,7 +78,7 @@ EOF
       File.open(script, 'w', 0755) { |f|
         f.write(%Q{\
 #!/bin/bash
-echo "Hello, World"
+echo "#{f} Hello, World"
 exit 0
 })
       }
@@ -97,7 +101,7 @@ exit 0
     @user.stubs(:uid).returns(@uid)
     @user.stubs(:uuid).returns(@uuid)
     @user.stubs(:app_name).returns('mocking')
-    @user.stubs(:get_mcs_label).with(any_parameters).returns('s0:c0,c1000')
+    @user.stubs(:get_mcs_label).with(any_parameters).returns('s0:c0,c501')
     @user.stubs(:container_uuid).returns(@uuid)
     @user.stubs(:container_name).returns('mocking')
     @user.stubs(:namespace).returns('nowhere')
