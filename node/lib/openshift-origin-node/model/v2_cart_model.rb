@@ -68,9 +68,10 @@ module OpenShift
     # configure('php-5.3')
     # configure('php-5.3', 'git://...')
     def configure(cartridge_name, template_git_url = nil)
-      OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
       output = ''
-      OpenShift::Utils::Cgroups::with_cgroups_disabled(user.uuid) do
+
+      OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
+      OpenShift::Utils::Cgroups::with_cgroups_disabled(@user.uuid) do
         create_cartridge_directory(cartridge_name)
         create_standard_env_vars(cartridge_name)
         create_private_endpoints(cartridge_name)
@@ -98,13 +99,13 @@ module OpenShift
     # deconfigure('php-5.3')
     def deconfigure(cartridge_name)
       delete_private_endpoints(cartridge_name)
-      OpenShift::Utils::Cgroups::with_cgroups_disabled(user.uuid) do
+      OpenShift::Utils::Cgroups::with_cgroups_disabled(@user.uuid) do
         do_control('stop', cartridge_name)
         unlock_gear(cartridge_name) { |c| cartridge_teardown(c) }
         delete_cartridge_directory(cartridge_name)
       end
 
-      OpenShift::FrontendHttpServer.new(user.container_uuid, user.container_name, user.namespace).reload_httpd
+      OpenShift::FrontendHttpServer.new(@user.container_uuid, @user.container_name, @user.namespace).reload_httpd
 
       nil
     end
@@ -204,7 +205,8 @@ module OpenShift
     #
     #   v2_cart_model.create_cartridge_directory('php-5.3')
     def create_cartridge_directory(cartridge_name)
-      base = File.join(@config.get('CARTRIDGE_BASE_PATH'), 'v2', cartridge_name)
+      # TODO: resolve correct location of v2 carts
+      base = File.join(@config.get('CARTRIDGE_BASE_PATH'), cartridge_name)
       Utils.oo_spawn("/bin/cp -ad #{base} .",
                      chdir:               @user.homedir,
                      expected_exitstatus: 0)
@@ -409,9 +411,9 @@ module OpenShift
       allocated_ips = []
 
       # Collect all existing endpoint IP allocations
-      @cart_model.process_cartridges do |cart_path|
+      process_cartridges do |cart_path|
         cart_name = File.basename(cart_path)
-        cart      = get_cartridge(cart_name)
+        cart      = @gear.get_cartridge(cart_name)
 
         cart.endpoints.each do |endpoint|
           # TODO: If the private IP variable exists but the value isn't in

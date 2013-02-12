@@ -13,11 +13,11 @@ module OpenShift
       end
 
       def self.disable_cgroups(uuid)
-        oo_spawn("oo-admin-ctl-cgroups stopuser #{uuid}")
+        OpenShift::Utils::oo_spawn("oo-admin-ctl-cgroups stopuser #{uuid}")
       end
 
       def self.enable_cgroups(uuid)
-        oo_spawn("oo-admin-ctl-cgroups startuser #{uuid}")
+        OpenShift::Utils::oo_spawn("oo-admin-ctl-cgroups startuser #{uuid}")
       end
     end
   end
