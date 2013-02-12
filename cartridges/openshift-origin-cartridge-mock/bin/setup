@@ -3,6 +3,8 @@
 # Mock cartridge for testing and verifying node platform code. This is
 # not an example of how to write a well-formed cartridge.
 
+source .env/*
+
 source /usr/libexec/openshift/cartridges/mock/mock.conf
 
 rm -rf $MOCK_STATE
@@ -18,7 +20,7 @@ function error_exit {
 version=0.1
 
 echo "Version: $version" >$MOCK_STATE/setup_version
-echo "export OPENSHIFT_MOCK_VERSION=\'$version\'" >mock-0.1/env/OPENSHIFT_MOCK_VERSION
+echo "export OPENSHIFT_MOCK_VERSION=\'$version\'" > mock/env/OPENSHIFT_MOCK_VERSION
 
 touch $MOCK_STATE/setup_succeed
 
