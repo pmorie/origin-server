@@ -205,6 +205,7 @@ module OpenShift
     #
     #   v2_cart_model.create_cartridge_directory('php-5.3')
     def create_cartridge_directory(cartridge_name)
+      @logger.info("Creating cartridge directory for #{cartridge_name}")
       # TODO: resolve correct location of v2 carts
       base = File.join(@config.get('CARTRIDGE_BASE_PATH'), cartridge_name)
       Utils.oo_spawn("/bin/cp -ad #{base} .",
@@ -213,6 +214,7 @@ module OpenShift
       Utils.oo_spawn(
           "chcon -R --reference=#{@user.homedir} #{File.join(@user.homedir, cartridge_name)}",
           expected_exitstatus: 0)
+      @logger.info("Created cartridge directory for #{cartridge_name}")
       nil
     end
 
@@ -221,18 +223,21 @@ module OpenShift
     end
 
     def populate_gear_repo(cartridge_name, template_git_url = nil)
+      @logger.info "Creating gear repo for #{cartridge_name}"
       repo = ApplicationRepository.new(@user)
       if template_git_url.nil?
         repo.populate_from_cartridge(cartridge_name)
       else
         raise NotImplementedError('populating repo from URL unsupported')
       end
+      @logger.info "Created gear repo for #{cartridge_name}"
     end
 
     # process_erb_templates(cartridge_name) -> nil
     #
     # Search cartridge for any remaining <code>erb</code> files render them
     def process_erb_templates(cartridge_name)
+      @logger.info "Processing ERB templates for #{cartridge_name}"
       env = Utils::Environ.for_gear(@user.homedir)
       render_erbs(env, File.join(@user.homedir, cartridge_name, '**'))
     end
@@ -245,6 +250,7 @@ module OpenShift
     #
     #   stdout = cartridge_setup('php-5.3')
     def cartridge_setup(cartridge_name, version=nil)
+      @logger.info "Running setup for #{cartridge_name}"
       # FIXME: Where?
       # setup IP Addresses
 
@@ -324,6 +330,7 @@ module OpenShift
     # Returns nil on success, or raises an exception if any errors occur: all errors
     # here are considered fatal.
     def create_private_endpoints(cart_name)
+      @logger.info "Creating private endpoints for #{cart_name}"
       cart = @gear.get_cartridge(cart_name)
 
       allocated_ips = {}
@@ -358,6 +365,8 @@ module OpenShift
         @logger.info("Created private endpoint for cart #{cart.name} in gear #{@gear.uuid}: "\
           "[#{endpoint.private_ip_name}=#{private_ip}, #{endpoint.private_port_name}=#{endpoint.private_port}]")
       end
+
+      @logger.info "Created private endpoints for #{cart_name}"
     end
 
     # TODO: How should this be implemented?
@@ -398,7 +407,7 @@ module OpenShift
     # Returns true if the given IP and port are currently unbound
     # according to lsof, otherwise false.
     def address_bound?(ip, port)
-      _, _, rc = Util.oo_spawn("/usr/sbin/lsof -i @#{ip}:#{port}")
+      _, _, rc = Utils.oo_spawn("/usr/sbin/lsof -i @#{ip}:#{port}")
       rc != 0
     end
 
@@ -437,8 +446,10 @@ module OpenShift
         return
       end
 
-      Dir[File.join(@user.homedir, "*-*")].each do |cart_dir|
-        next if "app-root" == cart_dir ||
+      # TODO: temporary hack to deal w/ version ambiguity and 'mock' cart.
+      Dir[File.join(@user.homedir, "*")].each do |cart_dir|
+        @logger.info cart_dir
+        next if cart_dir.end_with?('app-root') ||
             (not File.directory? cart_dir)
         yield cart_dir
       end

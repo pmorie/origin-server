@@ -45,7 +45,6 @@ module OpenShift
 
       uid          = 1000
       out, err, rc = Utils.oo_spawn("echo Hello, World",
-                                    chdir: "/tmp",
                                     uid:   uid)
       assert_equal 0, rc
       assert_empty err
