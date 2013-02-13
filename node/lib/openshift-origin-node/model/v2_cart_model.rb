@@ -388,6 +388,7 @@ module OpenShift
     # for the given port, or returns nil if IP is available.
     def find_open_ip(port)
       allocated_ips = get_allocated_private_ips
+      @logger.debug("IPs already allocated for #{port} in gear #{@gear.uuid}: #{allocated_ips}")
 
       open_ip = nil
 
@@ -398,8 +399,12 @@ module OpenShift
         next if allocated_ips.include?(candidate_ip)
 
         # Check to ensure the IP/port is not currently bound to another process
-        next if address_bound?(candidate_ip, port)
-
+        if address_bound?(candidate_ip, port)
+          @logger.debug("Candidate address #{candidate_ip}:#{port} is unallocated by the gear
+            but is already bound to another process and will be skipped")
+          next
+        end
+        
         open_ip = candidate_ip
         break
       end
@@ -407,11 +412,11 @@ module OpenShift
       open_ip
     end
 
-    # Returns true if the given IP and port are currently unbound
+    # Returns true if the given IP and port are currently bound
     # according to lsof, otherwise false.
     def address_bound?(ip, port)
       _, _, rc = Utils.oo_spawn("/usr/sbin/lsof -i @#{ip}:#{port}")
-      rc != 0
+      rc == 0
     end
 
     # Returns an array containing all currently allocated endpoint private
