@@ -56,7 +56,7 @@ module OpenShift
     def tidy
       begin
         do_control('tidy')
-      rescue OpenShift::Utils::ShellExecutionException => e
+      rescue Utils::ShellExecutionException => e
         @logger.warn("Cartridge tidy operation failed on gear #{@gear.uuid} for cart #{cartridge_name}: #{e.message} (rc=#{e.rc})")
       end
     end
@@ -208,6 +208,9 @@ module OpenShift
       @logger.info("Creating cartridge directory for #{cartridge_name}")
       # TODO: resolve correct location of v2 carts
       base = File.join(@config.get('CARTRIDGE_BASE_PATH'), cartridge_name)
+      `ls #{base}`
+      `ls .`
+      `pwd`
       Utils.oo_spawn("/bin/cp -ad #{base} .",
                      chdir:               @user.homedir,
                      expected_exitstatus: 0)
@@ -273,7 +276,7 @@ module OpenShift
                                     chdir:           @user.homedir,
                                     uid:             @user.uid)
 
-      raise OpenShift::Utils::ShellExecutionException.new(
+      raise Utils::ShellExecutionException.new(
                 "Failed to execute: #{setup} for #{@user.uuid} in #{@user.homedir}",
                 rc, out, err) unless 0 == rc
       @logger.info("Setup #{cartridge_name} for user #{@user.uuid} in #{cartridge_home}")
@@ -469,7 +472,7 @@ module OpenShift
                                       chdir:           @user.homedir,
                                       uid:             @user.uid)
         buffer << out
-        raise ShellExecutionException.new(
+        raise Utils::ShellExecutionException.new(
                   "Failed to execute: '#{pre_action}' for #{@user.uuid} application #{@user.app_name}",
                   rc, buffer, err
               ) if rc != 0
@@ -500,7 +503,7 @@ module OpenShift
                                       uid:             @user.uid)
         buffer << out
 
-        raise ShellExecutionException.new(
+        raise Utils::ShellExecutionException.new(
                   "Failed to execute: 'control #{action}' for #{path}", rc, buffer, err
               ) if rc != 0
       }
@@ -513,7 +516,7 @@ module OpenShift
                                       chdir:           @user.homedir,
                                       uid:             @user.uid)
         buffer << out
-        raise ShellExecutionException.new(
+        raise Utils::ShellExecutionException.new(
                   "Failed to execute: '#{post_action}' for #{@user.uuid} application #{@user.app_name}",
                   rc, buffer, err
               ) if rc != 0
