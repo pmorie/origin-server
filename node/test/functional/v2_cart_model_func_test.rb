@@ -28,7 +28,9 @@ class V2CartModelFuncTest < Test::Unit::TestCase
   # to set up fixture information.
   def setup
     skip "run_as tests require root permissions"  if 0 != Process.uid
-    File.chmod(0777, 'test/coverage')
+    coverage_path = 'test/coverage'
+    FileUtils.mkpath(coverage_path) unless File.exist? coverage_path
+    File.chmod(0777, coverage_path)
 
     # TODO: is this a safe uid?
     @uid            = 501
@@ -89,7 +91,7 @@ exit 0
 
     @config = mock('OpenShift::Config')
     @config.stubs(:get).with('BROKER_HOST').returns('localhost')
-    @config.stubs(:get).with('CARTRIDGE_BASE_PATH').returns('/tmp/cartridges')
+    @config.stubs(:get).with('CARTRIDGE_BASE_PATH').returns('/tmp/cartridges/v2')
     OpenShift::Config.stubs(:new).returns(@config)
 
     mock_cart = MockCartridge.new(Array.new)
@@ -101,7 +103,7 @@ exit 0
     @user.stubs(:uid).returns(@uid)
     @user.stubs(:uuid).returns(@uuid)
     @user.stubs(:app_name).returns('mocking')
-    @user.stubs(:get_mcs_label).with(any_parameters).returns('s0:c0,c501')
+    @user.stubs(:get_mcs_label).with(any_parameters).returns("s0:c0,c#@uid")
     @user.stubs(:container_uuid).returns(@uuid)
     @user.stubs(:container_name).returns('mocking')
     @user.stubs(:namespace).returns('nowhere')
