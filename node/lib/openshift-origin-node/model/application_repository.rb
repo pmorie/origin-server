@@ -47,6 +47,8 @@ module OpenShift
     # If the directory +template.git+ exists it will be cloned as the application's repository.
     #
     def populate_from_cartridge(cartridge_name)
+      FileUtils.mkpath(File.join(@user.homedir, 'git'))
+
       cartridge_template     = File.join(@user.homedir, cartridge_name, 'template')
       cartridge_template_git = File.join(@user.homedir, cartridge_name, 'template.git')
 
