@@ -18,8 +18,12 @@ require 'rubygems'
 require 'timeout'
 require 'open4'
 
+require_relative '../utils/node_logger'
+
 module OpenShift
   module Utils
+    include NodeLogger
+
     class ShellExecutionException < Exception
       attr_accessor :rc, :stdout, :stderr
       def initialize(msg, rc=-1, stdout = nil, stderr = nil)
@@ -88,13 +92,15 @@ module OpenShift
 
             mcs_level = OpenShift::UnixUser.get_mcs_label options[:uid]
             cmd = %Q{/usr/bin/runcon -r system_r -t openshift_t -l #{mcs_level} bash -c "#{command}"}
-            puts "cmd ==> #{cmd}"
+            NodeLogger.logger.debug { "oo_spawn running #{cmd}" }
+
             fork_pid = fork {
               Process::GID.change_privilege(options[:gid].to_i)
               Process::UID.change_privilege(options[:uid].to_i)
               pid = Kernel.spawn(options[:env], cmd, opts)
             }
           else
+            NodeLogger.logger.debug { "oo_spawn running #{command}" }
             pid = Kernel.spawn(options[:env], command, opts)
             unless pid
               raise OpenShift::Utils::ShellExecutionException.new(
@@ -135,6 +141,7 @@ module OpenShift
     #   :timeout     => seconds to wait for command to finish. Default: 3600
     #   :buffer_size => how many bytes to read from pipe per iteration. Default: 32768
     def self.read_results(stdout, stderr, options)
+      # TODO: Are these variables thread safe...?
       out     = ''
       err     = ''
       readers = [stdout, stderr]
@@ -149,7 +156,7 @@ module OpenShift
               buffer = (fd == stdout) ? out : err
               begin
                 buffer << fd.readpartial(options[:buffer_size])
-                puts "buffer: #{buffer}\n" if $DEBUG
+                NodeLogger.logger.debug { "oo_spawn buffer: #{buffer}\n"}
               rescue Errno::EAGAIN, Errno::EINTR
               rescue EOFError
                 readers.delete(fd)

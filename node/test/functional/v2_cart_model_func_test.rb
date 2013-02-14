@@ -27,10 +27,7 @@ class V2CartModelFuncTest < Test::Unit::TestCase
   # Called before every test method runs. Can be used
   # to set up fixture information.
   def setup
-    skip "run_as tests require root permissions"  if 0 != Process.uid
-    coverage_path = 'test/coverage'
-    FileUtils.mkpath(coverage_path) unless File.exist? coverage_path
-    File.chmod(0777, coverage_path)
+    skip 'run_as tests require root permissions' if 0 != Process.uid
 
     # TODO: is this a safe uid?
     @uid            = 501

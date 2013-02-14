@@ -71,8 +71,10 @@ class ApplicationRepositoryFuncTest < Test::Unit::TestCase
     @user           = User.new("/tmp/tests/#@uuid", 1000, 'mocking')
 
     # UnixUser tasks...
-    FileUtils.mkpath(File.join(@user.homedir, 'git'))
+    FileUtils.mkpath(File.join(@user.homedir, %w{app-root runtime repo}))
+    FileUtils.mkpath(File.join(@user.homedir, %w{app-root data}))
     File.chown(@user.uid, @user.uid, @user.homedir)
+
     `chcon -R -r object_r -t openshift_var_lib_t -l s0:c0,c#{@user.uid} #{@user.homedir}`
 
     @config = mock('OpenShift::Config')
