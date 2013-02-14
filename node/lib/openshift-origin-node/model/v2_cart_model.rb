@@ -3,19 +3,22 @@ require 'logger'
 require 'openshift-origin-node/model/unix_user'
 require 'openshift-origin-node/model/application_repository'
 require 'openshift-origin-node/utils/shell_exec'
+require 'openshift-origin-node/utils/node_logger'
 require 'openshift-origin-node/utils/cgroups'
 require 'openshift-origin-node/utils/sdk'
 require 'openshift-origin-node/utils/environ'
 
 module OpenShift
   class V2CartridgeModel
+    include NodeLogger
+
     FILENAME_BLACKLIST = %W{.ssh .sandbox .tmp .env}
 
     def initialize(config, user, gear, logger = nil)
       @config  = config
       @user    = user
       @gear    = gear
-      @logger  = logger ||= Logger.new(STDOUT)
+      @logger  = self.logger
       @timeout = 30
     end
 
