@@ -78,7 +78,7 @@ module OpenShift
 
         Dir.chdir(@user.homedir) do
           unlock_gear(cartridge_name) do |c|
-            output << cartridge_setup(c)
+            output = cartridge_setup(c)
             populate_gear_repo(c, template_git_url)
           end
         end
@@ -89,6 +89,7 @@ module OpenShift
         OpenShift::FrontendHttpServer.new(@user.container_uuid, @user.container_name, @user.namespace).reload_httpd
       end
 
+      @logger.info "configure output: #{output}"
       output
     end
 
@@ -273,13 +274,14 @@ module OpenShift
       out, err, rc = Utils.oo_spawn(setup,
                                     env:             cartridge_env,
                                     unsetenv_others: true,
-                                    chdir:           @user.homedir,
+                                    chdir:           cartridge_home,
                                     uid:             @user.uid)
 
       raise Utils::ShellExecutionException.new(
                 "Failed to execute: #{setup} for #{@user.uuid} in #{@user.homedir}",
                 rc, out, err) unless 0 == rc
-      @logger.info("Setup #{cartridge_name} for user #{@user.uuid} in #{cartridge_home}")
+      @logger.info("Ran setup for #{cartridge_name} for user #{@user.uuid} in #{cartridge_home}")
+      @logger.info("Setup output: #{out}")
       out
     end
 

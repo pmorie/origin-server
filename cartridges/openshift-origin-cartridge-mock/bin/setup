@@ -3,11 +3,12 @@
 # Mock cartridge for testing and verifying node platform code. This is
 # not an example of how to write a well-formed cartridge.
 
+source ~/.env/*
 source .env/*
 
 source /usr/libexec/openshift/cartridges/mock/mock.conf
 
-rm -rf $MOCK_STATE
+rm -rf $MOCK_STATE/
 mkdir $MOCK_STATE
 touch $MOCK_STATE/setup_called
 
@@ -16,6 +17,8 @@ function error_exit {
   echo -e $1 1>&2
   exit $2
 }
+
+echo "OPENSHIFT_DATA_DIR: $OPENSHIFT_DATA_DIR"
 
 version=0.1
 
