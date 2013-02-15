@@ -4,9 +4,12 @@
 # not an example of how to write a well-formed cartridge.
 
 source ~/.env/*
-source .env/*
 
 source /usr/libexec/openshift/cartridges/mock/mock.conf
+
+PATH=/bin/:/usr/bin:$PATH
+
+echo "PATH = $PATH"
 
 rm -rf $MOCK_STATE/
 mkdir $MOCK_STATE
