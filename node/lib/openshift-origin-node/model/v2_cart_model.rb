@@ -161,6 +161,10 @@ module OpenShift
     #
     #   v2_cart_model.do_unlock_gear(entries)
     def do_unlock_gear(entries)
+      logger.info "Unlocking gear"
+
+      mcs_label = @user.get_mcs_label(@user.uid)
+
       entries.each do |entry|
         if entry.end_with?('/')
           FileUtils.mkpath(entry, mode: 0755) unless File.exist?(entry)
@@ -171,7 +175,11 @@ module OpenShift
         # It is expensive doing one file at a time but...
         # ...it allows reporting on the failed command at the file level
         # ...we don't have to worry about the length of argv
-        UnixUser.match_ownership(@user.homedir, entry)
+        Utils.oo_spawn(
+            "chown #{@user.uid}:#{@user.gid} #{entry};
+             chcon unconfined_u:object_r:openshift_var_lib_t:s0:#{mcs_label} #{entry}",
+             expected_exitstatus: 0
+        )
       end
       nil
     end
@@ -181,6 +189,7 @@ module OpenShift
     # Take the given array of file system entries and prepare them for the application developer
     #    v2_cart_model.do_lock_gear(entries)
     def do_lock_gear(entries)
+      logger.info "Locking gear"
       mcs_label = @user.get_mcs_label(@user.uid)
 
       # It is expensive doing one file at a time but...
@@ -189,7 +198,8 @@ module OpenShift
       entries.each do |entry|
         Utils.oo_spawn(
             "chown root:root #{entry};
-             chcon unconfined_u:object_r:openshift_var_lib_t:s0:#{mcs_label} #{entry}"
+             chcon system_u:object_r:openshift_var_lib_t:s0:#{mcs_label} #{entry}",
+             expected_exitstatus: 0
         )
       end
       nil
@@ -298,7 +308,7 @@ module OpenShift
       path_glob << '/*.erb'
       Dir.glob(path_glob).select { |f| File.file?(f) }.each do |file|
         # FIXME: need to determine path to correct erb. oo-ruby?
-        Utils.oo_spawn(%Q{erb -S 2 -- #{file} >#{file.chomp('.erb')}},
+        Utils.oo_spawn(%Q{erb -S 2 -- #{file} > #{file.chomp('.erb')}},
                        env:             env,
                        unsetenv_others: true,
                        chdir:           @user.homedir,
@@ -461,7 +471,6 @@ module OpenShift
 
       # TODO: temporary hack to deal w/ version ambiguity and 'mock' cart.
       Dir[File.join(@user.homedir, "*")].each do |cart_dir|
-        @logger.info cart_dir
         next if cart_dir.end_with?('app-root') ||
             (not File.directory? cart_dir)
         yield cart_dir
