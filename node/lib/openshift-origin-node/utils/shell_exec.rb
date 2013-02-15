@@ -91,7 +91,7 @@ module OpenShift
             require 'openshift-origin-node/model/unix_user'
 
             mcs_level = OpenShift::UnixUser.get_mcs_label options[:uid]
-            cmd = %Q{/usr/bin/runcon -r system_r -t openshift_t -l #{mcs_level} bash -c "#{command}"}
+            cmd = %Q{/usr/bin/runcon -r system_r -t openshift_t -l #{mcs_level} /bin/bash -c "#{command}"}
             NodeLogger.logger.debug { "oo_spawn running #{cmd}" }
 
             fork_pid = fork {
