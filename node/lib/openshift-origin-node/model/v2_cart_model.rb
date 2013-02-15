@@ -78,7 +78,7 @@ module OpenShift
 
         Dir.chdir(@user.homedir) do
           unlock_gear(cartridge_name) do |c|
-            output = cartridge_setup(c)
+            output << cartridge_setup(c)
             populate_gear_repo(c, template_git_url)
           end
         end
@@ -274,7 +274,7 @@ module OpenShift
       out, err, rc = Utils.oo_spawn(setup,
                                     env:             cartridge_env,
                                     unsetenv_others: true,
-                                    chdir:           cartridge_home,
+                                    chdir:           @user.homedir,
                                     uid:             @user.uid)
 
       raise Utils::ShellExecutionException.new(
