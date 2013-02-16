@@ -51,18 +51,26 @@ module OpenShift
                                        app_name, container_name, namespace, quota_blocks, quota_files)
       @state            = OpenShift::Utils::ApplicationState.new(container_uuid)
 
-      v1_marker_exist = File.exist?(File.join(@config.get('GEAR_BASE_DIR'), '.settings', 'v1_cartridge_format'))
-      v2_marker_exist = File.exist?(File.join(@config.get('GEAR_BASE_DIR'), '.settings', 'v2_cartridge_format'))
+      build_model = :v1
+      if @user.homedir && File.exist?(@user.homedir)
+        build_model = :v2 if OpenShift::Utils::Sdk.new_sdk_app?(@user.homedir)
+      else
+        v1_marker_exist = File.exist?(File.join(@config.get('GEAR_BASE_DIR'), '.settings', 'v1_cartridge_format'))
+        v2_marker_exist = File.exist?(File.join(@config.get('GEAR_BASE_DIR'), '.settings', 'v2_cartridge_format'))
 
-      if  v1_marker_exist and v2_marker_exist
-        raise 'Node cannot create both v1 and v2 formatted cartridges. Delete one of the cartridge format marker files'
+        if  v1_marker_exist and v2_marker_exist
+          raise 'Node cannot create both v1 and v2 formatted cartridges. Delete one of the cartridge format marker files'
+        end
+
+        # TODO: When v2 is the default cartridge format change this test...
+        build_model = :v2 if v2_marker_exist
       end
 
       # When v2 is the default cartridge format flip the test...
-      @cart_model = if v2_marker_exist
-                      V2CartridgeModel.new(@config, @user, self, @logger)
-                    else
+      @cart_model = if :v1 == build_model
                       V1CartridgeModel.new(@config, @user, self, @logger)
+                    else
+                      V2CartridgeModel.new(@config, @user, self, @logger)
                     end
     end
 
