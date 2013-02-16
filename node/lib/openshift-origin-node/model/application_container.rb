@@ -50,8 +50,8 @@ module OpenShift
                                        app_name, container_name, namespace, quota_blocks, quota_files)
       @state            = OpenShift::Utils::ApplicationState.new(container_uuid)
 
-      # TODO: When v2 is the default cartridge format change this default...
-      build_model       = :v1
+      build_model = :v1
+      
       if @user.homedir && File.exist?(@user.homedir)
         build_model = :v2 if OpenShift::Utils::Sdk.new_sdk_app?(@user.homedir)
       else

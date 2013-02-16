@@ -31,6 +31,72 @@ require 'mocha'
 class V2CartModelTest < Test::Unit::TestCase
 
   def setup
+    # Set up the config
+    @config = mock('OpenShift::Config')
+    @config.stubs(:get).with("GEAR_BASE_DIR").returns("/tmp")
+
+    OpenShift::Utils::Sdk.stubs(:new_sdk_app?).returns(true)
+
+    script_dir = File.expand_path(File.dirname(__FILE__))
+    cart_base_path = File.join(script_dir, '..', '..', '..', 'cartridges')
+
+    raise "Couldn't find cart base path at #{cart_base_path}" unless File.exists?(cart_base_path)
+
+    @config.stubs(:get).with("CARTRIDGE_BASE_PATH").returns(cart_base_path)
+
+    OpenShift::Config.stubs(:new).returns(@config)
+
+    # Set up the container
+    @gear_uuid = "501"
+    @user_uid = "501"
+    @app_name = 'UnixUserTestCase'
+    @gear_name = @app_name
+    @namespace = 'jwh201204301647'
+    @gear_ip = "127.0.0.1"
+
+    @container = OpenShift::ApplicationContainer.new(@gear_uuid, @gear_uuid, @user_uid,
+        @app_name, @gear_uuid, @namespace, nil, nil, nil)
+
+    @model = OpenShift::V2CartridgeModel.new(@config, @container.user, @container, nil)
+    @cart_name = "openshift-origin-cartridge-mock"
+  end
+
+  def test_private_endpoint_create
+    ip1 = "127.0.250.1"
+    ip2 = "127.0.250.2"
+
+    @model.expects(:find_open_ip).with(8080).returns(ip1)
+    @model.expects(:find_open_ip).with(9090).returns(ip2)
+
+    @model.expects(:address_bound?).returns(false).times(4)
+
+    @container.user.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP1", ip1)
+    @container.user.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT1", 8080)
+    @container.user.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT2", 8081)
+    @container.user.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT3", 8082)
+    @container.user.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP2", ip2)
+    @container.user.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT4", 9090)
+    
+    @model.create_private_endpoints(@cart_name)
+  end
+ 
+  # Verifies that an IP can be allocated for a simple port binding request
+  # where no other IPs are allocated to any carts in a gear.
+  def test_find_open_ip_success
+    @model.expects(:get_allocated_private_ips).returns([])
+    @model.expects(:address_bound?).returns(false)
+
+    assert_equal @model.find_open_ip(8080), "127.0.250.129"
+  end
+
+  # Ensures that a previously allocated IP within the gear won't be recycled
+  # when a new allocation request is made.
+  def test_find_open_ip_already_allocated
+    @model.expects(:get_allocated_private_ips).returns(["127.0.250.129"])
+
+    @model.expects(:address_bound?).returns(false)
+
+    assert_equal @model.find_open_ip(8080), "127.0.250.130"
   end
 
   # Verifies that nil is returned from find_open_ip when all requested ports are
