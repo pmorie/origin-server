@@ -17,6 +17,7 @@ Then /^the platform-created default environment variables will exist$/ do
   app_env_var_will_exist('APP_NAME')
   app_env_var_will_exist('APP_UUID')
   app_env_var_will_exist('DATA_DIR')
+  app_env_var_will_exist('REPO_DIR')
   app_env_var_will_exist('GEAR_DNS')
   app_env_var_will_exist('GEAR_NAME')
   app_env_var_will_exist('GEAR_UUID')
@@ -24,6 +25,15 @@ Then /^the platform-created default environment variables will exist$/ do
   app_env_var_will_exist('HOMEDIR')
   app_env_var_will_exist('HISTFILE', false)
   app_env_var_will_exist('PATH', false)
+end
+
+Then /^the mock cartridge private endpoints will be exposed$/ do
+  app_env_var_will_exist('MOCK_EXAMPLE_IP1')
+  app_env_var_will_exist('MOCK_EXAMPLE_PORT1')
+  app_env_var_will_exist('MOCK_EXAMPLE_IP2')
+  app_env_var_will_exist('MOCK_EXAMPLE_PORT2')
+  app_env_var_will_exist('MOCK_EXAMPLE_PORT3')
+  app_env_var_will_exist('MOCK_EXAMPLE_PORT4')
 end
 
 def app_env_var_will_exist(var_name, prefix = true)

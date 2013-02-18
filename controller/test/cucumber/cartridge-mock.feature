@@ -5,7 +5,7 @@ Feature: V2 SDK Mock Cartridge
   Given a new mock type application
   Then the application git repo will exist
   And the platform-created default environment variables will exist
-  # And the mock cartridge private endpoints should be exposed
+  And the mock cartridge private endpoints will be exposed
   And the mock setup_version marker will exist
   And the mock setup_failure marker will not exist
   And the mock MOCK_EXAMPLE env entry will exist
