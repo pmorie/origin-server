@@ -22,6 +22,7 @@ module OpenShift; end
 require 'test_helper'
 require 'openshift-origin-node/model/application_container'
 require 'openshift-origin-node/model/v2_cart_model'
+require 'openshift-origin-node/model/cartridge'
 require 'openshift-origin-node/utils/environ'
 require 'openshift-origin-common'
 require 'test/unit'
@@ -59,6 +60,19 @@ class V2CartModelTest < Test::Unit::TestCase
 
     @model = OpenShift::V2CartridgeModel.new(@config, @container.user, @container, nil)
     @cart_name = "openshift-origin-cartridge-mock"
+
+    @mock_cartridge = OpenShift::Runtime::Cartridge.new({
+      "Name" => "mock",
+      "Namespace" => "MOCK",
+      "Endpoints" => [
+        "EXAMPLE_IP1:EXAMPLE_PORT1(8080):EXAMPLE_PUBLIC_PORT1",
+        "EXAMPLE_IP1:EXAMPLE_PORT2(8081):EXAMPLE_PUBLIC_PORT2",
+        "EXAMPLE_IP1:EXAMPLE_PORT3(8082):EXAMPLE_PUBLIC_PORT3",
+        "EXAMPLE_IP2:EXAMPLE_PORT4(9090)"
+      ]
+    })
+
+    @container.stubs(:get_cartridge).returns(@mock_cartridge)
   end
 
   def test_private_endpoint_create

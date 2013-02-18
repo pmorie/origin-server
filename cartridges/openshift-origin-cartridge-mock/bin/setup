@@ -5,7 +5,7 @@
 
 source ~/.env/*
 
-source /usr/libexec/openshift/cartridges/mock/mock.conf
+source /usr/libexec/openshift/cartridges/v2/mock/mock.conf
 
 PATH=/bin/:/usr/bin:$PATH
 
