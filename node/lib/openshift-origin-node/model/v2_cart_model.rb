@@ -23,6 +23,23 @@ module OpenShift
     end
 
     def get_cart_manifest_path(cart_name)
+      # TODO: 
+      #
+      # In this WIP, V2 cartridges are installed to and loaded
+      # from 
+      #
+      # /usr/libexec/openshift/cartridges/v2
+      #
+      # The planned path on disk that V2 cartridges 
+      # will be installed to in the end-state of this WIP is
+      #
+      # /usr/libexec/openshift/v2/cartridges
+      #
+      # We need to determine whether CARTRIDGE_BASE_PATH can safely
+      # be used in V2 code.  It points directly to
+      #
+      # /usr/libexec/openshift/cartridges
+      #
       File.join(@config.get('CARTRIDGE_BASE_PATH'), 'v2', cart_name, 'metadata', 'manifest.yml')
     end
 
