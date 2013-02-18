@@ -9,11 +9,37 @@ Then /^the mock ([^ ]+) marker will( not)? exist$/ do |marker, negate|
 end
 
 Then /^the mock ([^ ]+) env entry will( not)? exist$/ do |variable, negate|
-  var_file = File.join($home_root, @gear.uuid, 'mock', 'env', variable)
+  cart_env_var_will_exist('mock', variable)
+end
 
-  if negate
-    assert_file_not_exists var_file
-  else 
-    assert_file_exists var_file
+Then /^the platform-created default environment variables will exist$/ do
+  app_env_var_will_exist('APP_DNS')
+  app_env_var_will_exist('APP_NAME')
+  app_env_var_will_exist('APP_UUID')
+  app_env_var_will_exist('DATA_DIR')
+  app_env_var_will_exist('GEAR_DNS')
+  app_env_var_will_exist('GEAR_NAME')
+  app_env_var_will_exist('GEAR_UUID')
+  app_env_var_will_exist('TMP_DIR')
+  app_env_var_will_exist('HOMEDIR')
+  app_env_var_will_exist('HISTFILE', false)
+  app_env_var_will_exist('PATH', false)
+end
+
+def app_env_var_will_exist(var_name, prefix = true)
+  if prefix
+    var_name = "OPENSHIFT_#{var_name}"
   end
+
+  var_file_path = File.join($home_root, @gear.uuid, '.env', var_name)
+
+  assert_file_exists var_file_path
+end
+
+def cart_env_var_will_exist(cart_name, var_name)
+  var_name = "OPENSHIFT_#{var_name}"
+
+  var_file_path = File.join($home_root, @gear.uuid, cart_name, 'env', var_name)
+
+  assert_file_exists var_file_path
 end
