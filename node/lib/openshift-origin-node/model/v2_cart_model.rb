@@ -177,7 +177,7 @@ module OpenShift
         # ...we don't have to worry about the length of argv
         Utils.oo_spawn(
             "chown #{@user.uid}:#{@user.gid} #{entry};
-             chcon unconfined_u:object_r:openshift_var_lib_t:s0:#{mcs_label} #{entry}",
+             chcon unconfined_u:object_r:openshift_var_lib_t:#{mcs_label} #{entry}",
              expected_exitstatus: 0
         )
       end
@@ -198,7 +198,7 @@ module OpenShift
       entries.each do |entry|
         Utils.oo_spawn(
             "chown root:root #{entry};
-             chcon system_u:object_r:openshift_var_lib_t:s0:#{mcs_label} #{entry}",
+             chcon system_u:object_r:openshift_var_lib_t:#{mcs_label} #{entry}",
              expected_exitstatus: 0
         )
       end
