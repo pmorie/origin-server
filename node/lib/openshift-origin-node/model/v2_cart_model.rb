@@ -9,6 +9,25 @@ require 'openshift-origin-node/utils/sdk'
 require 'openshift-origin-node/utils/environ'
 
 module OpenShift
+  # TODO use this expections when oo_spawn fails...
+  class FileLockError < Exception
+    attr_reader :filename
+
+    def initialize(msg = nil, filename)
+      super(msg)
+      @filename = filename
+    end
+  end
+
+  class FileUnlockError < Exception
+    attr_reader :filename
+
+    def initialize(msg = nil, filename)
+      super(msg)
+      @filename = filename
+    end
+  end
+
   class V2CartridgeModel
     include NodeLogger
 
@@ -47,7 +66,7 @@ module OpenShift
     # destroy() -> nil
     #
     # Remove all cartridges from a gear and delete the gear.  Accepts
-    # and discards any parameters to comply with the signature of V1 
+    # and discards any parameters to comply with the signature of V1
     # require, which accepted a single argument.
     #
     # destroy()
@@ -159,6 +178,7 @@ module OpenShift
 
       files = Array.new
       File.readlines(locked_files).each do |line|
+        line.chomp!
         case
           when line.end_with?('/*')
             files << Dir.glob(File.join(@user.homedir, line)).select { |f| File.file?(f) }
@@ -179,13 +199,12 @@ module OpenShift
     #
     #   v2_cart_model.do_unlock_gear(entries)
     def do_unlock_gear(entries)
-      logger.info "Unlocking gear"
-
       mcs_label = @user.get_mcs_label(@user.uid)
 
       entries.each do |entry|
         if entry.end_with?('/')
-          FileUtils.mkpath(entry, mode: 0755) unless File.exist?(entry)
+          entry.chomp!('/')
+          FileUtils.mkpath(entry, mode: 0755) unless File.exist? entry
         else
           # FileUtils.touch not used as it doesn't support mode
           File.new(entry, File::CREAT|File::TRUNC|File::WRONLY, 0644).close() unless File.exist?(entry)
@@ -207,7 +226,6 @@ module OpenShift
     # Take the given array of file system entries and prepare them for the application developer
     #    v2_cart_model.do_lock_gear(entries)
     def do_lock_gear(entries)
-      logger.info "Locking gear"
       mcs_label = @user.get_mcs_label(@user.uid)
 
       # It is expensive doing one file at a time but...
@@ -435,7 +453,7 @@ module OpenShift
             but is already bound to another process and will be skipped")
           next
         end
-        
+
         open_ip = candidate_ip
         break
       end

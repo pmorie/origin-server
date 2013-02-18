@@ -16,112 +16,88 @@
 
 require_relative '../../lib/openshift-origin-node/model/v2_cart_model'
 require_relative '../../lib/openshift-origin-node/model/cartridge'
+require_relative '../../lib/openshift-origin-node/utils/shell_exec'
 
 require 'test/unit'
 require 'mocha'
 require 'pathname'
 
-class V2CartModelFuncTest < Test::Unit::TestCase
-  MockCartridge = Struct.new(:endpoints)
+module OpenShift
+  class V2CartridgeModelFuncTest < Test::Unit::TestCase
+    # Called before every test method runs. Can be used
+    # to set up fixture information.
+    def setup
+      @uuid    = `uuidgen -r |sed -e s/-//g`.chomp
+      @homedir = "/tmp/tests/#@uuid"
 
-  # Called before every test method runs. Can be used
-  # to set up fixture information.
-  def setup
-    skip 'run_as tests require root permissions' if 0 != Process.uid
+      @files = %w{/tmp/a /tmp/b/}
 
-    # TODO: is this a safe uid?
-    @uid            = 501
-    @uuid           = `uuidgen -r |sed -e s/-//g`.chomp
-    @cartridge_name = 'mock-0.0'
-    @cartridge_path = File.join(File::SEPARATOR, 'tmp', 'cartridges', 'v2', @cartridge_name)
-    @homedir        = File.join(File::SEPARATOR, 'tmp', 'tests', @uuid)
-    FileUtils.mkpath(@cartridge_path)
+      @user = mock('MockUser') do
+        stubs(:get_mcs_label).returns('c0,c1000')
+        stubs(:gid).returns(1000)
+        stubs(:uid).returns(1000)
+      end
 
-    # UnixUser tasks...
-    FileUtils.mkpath(File.join(@homedir, 'git'))
-    FileUtils.mkpath(File.join(@homedir, '.env'))
+      @model = V2CartridgeModel.new(nil, @user, nil)
+    end
 
-    # Cartridge Author tasks...
-    perl = File.join(@cartridge_path, 'template', 'perl')
-    FileUtils.mkpath(perl)
-    File.open(File.join(perl, 'health_check.pl'), 'w', 0664) { |f|
-      f.write(%Q{\
-#!/usr/bin/perl
-print "Content-type: text/plain\r\n\r\n";
-print "1";
-})
-    }
+    def teardown
+      FileUtils.rm_rf(@files)
+      FileUtils.rm_rf(@homedir)
+    end
 
-    File.open(File.join(perl, 'index.pl'), 'w', 0664) { |f|
-      f.write(%Q{\
-#!/usr/bin/perl
-print "Content-type: text/html\r\n\r\n";
-print <<EOF
-  <html>
-    <head>
-      <title>Welcome to OpenShift</title>
-    </head>
-    <body>
-      <p>Welcome to OpenShift
-    </body>
-  </html>
-EOF
-})
-    }
+    def test_do_unlock_gear
+      @model.do_unlock_gear(@files)
 
-    setup   = File.join(File.join(@cartridge_path, 'bin', 'setup'))
-    control = File.join(File.join(@cartridge_path, 'bin', 'control'))
-    FileUtils.mkpath(Pathname.new(setup).parent.to_path)
+      assert File.file?('/tmp/a'), 'Unlock failed to create file'
+      assert File.directory?('/tmp/b'), 'Unlock failed to create directory'
+    end
 
-    [setup, control].each { |script|
-      File.open(script, 'w', 0755) { |f|
-        f.write(%Q{\
-#!/bin/bash
-echo "#{f} Hello, World"
-exit 0
-})
-      }
-    }
+    def test_do_lock_gear
+      FileUtils.touch('/tmp/a')
+      FileUtils.mkpath('/tmp/b')
 
-    FileUtils.chown_R(@uid, @uid, @homedir)
-    `chcon -R -r object_r -t openshift_var_lib_t -l s0:c0,c#@uid #@homedir`
+      @model.do_lock_gear(@files)
 
-    @config = mock('OpenShift::Config')
-    @config.stubs(:get).with('BROKER_HOST').returns('localhost')
-    @config.stubs(:get).with('CARTRIDGE_BASE_PATH').returns('/tmp/cartridges/v2')
-    OpenShift::Config.stubs(:new).returns(@config)
+      assert File.file?('/tmp/a'), 'Lock failed to create file'
+      assert File.directory?('/tmp/b'), 'Lock failed to create directory'
+    end
 
-    mock_cart = MockCartridge.new(Array.new)
-    @gear     = mock('OpenShift::ApplicationContainer')
-    @gear.stubs(:get_cartridge).with(@cartridge_name).returns(mock_cart)
+    def test_lock_files
+      @user.stubs(:homedir).returns(@homedir)
+      FileUtils.mkpath(File.join(@homedir, 'mock', 'metadata'))
 
-    @user = mock('OpenShift::UnixUser')
-    @user.stubs(:homedir).returns(@homedir)
-    @user.stubs(:uid).returns(@uid)
-    @user.stubs(:uuid).returns(@uuid)
-    @user.stubs(:app_name).returns('mocking')
-    @user.stubs(:get_mcs_label).with(any_parameters).returns("s0:c0,c#@uid")
-    @user.stubs(:container_uuid).returns(@uuid)
-    @user.stubs(:container_name).returns('mocking')
-    @user.stubs(:namespace).returns('nowhere')
+      Dir.chdir(@homedir) do
+        File.open('mock/metadata/locked_files.txt', 'w') do |f|
+          f.write("\nmock/c\nmock/d/\n")
+        end
+        assert File.exists? File.join(@homedir, 'mock', 'metadata', 'locked_files.txt')
 
-    @mock_frontend = mock("Mock Frontend")
-    @mock_frontend.stubs(:reload_httpd).returns(true)
-    OpenShift::FrontendHttpServer.stubs(:new).with(any_parameters).returns(@mock_frontend)
-  end
+        files = @model.lock_files('mock')
 
-  # Called after every test method runs. Can be used to tear
-  # down fixture information.
+        assert_equal(
+            [File.join(@homedir, 'mock/c'), File.join(@homedir, 'mock/d/')],
+            files)
+      end
+    end
 
-  def teardown
-    #FileUtils.rm_rf(@user.homedir)
-  end
+    def test_unlock_gear
+      @user.stubs(:homedir).returns(@homedir)
+      FileUtils.mkpath(File.join(@homedir, 'mock', 'metadata'))
 
-  def test_configure
-    m = OpenShift::V2CartridgeModel.new(@config, @user, @gear)
-    refute_nil m
+      Dir.chdir(@homedir) do
+        File.open('mock/metadata/locked_files.txt', 'w') do |f|
+          f.write("\nmock/c\nmock/d/\n")
+        end
+        assert File.exists? File.join(@homedir, 'mock', 'metadata', 'locked_files.txt')
 
-    buffer = m.configure(@cartridge_name)
-    refute_empty buffer
+        @model.unlock_gear('mock') do |actual|
+          assert_equal 'mock', actual
+        end
+      end
+
+      assert File.file?(File.join(@homedir, 'mock', 'c')), 'Unlock gear failed to create file'
+      assert File.directory?(File.join(@homedir, 'mock', 'd')), 'Unlock gear failed to create directory'
+    end
   end
 end
