@@ -1,14 +1,17 @@
 #!/bin/bash -e
 set -u
 
-version=$1
+PATH=/bin:/usr/bin:$PATH
+
+version=5.3
 echo "export OPENSHIFT_PHP_VERSION=\'$version\'" > "$OPENSHIFT_HOMEDIR/php/.env/OPENSHIFT_PHP_VERSION"
 
 # Copy the version specific files upto php directory
 OPENSHIFT_PHP_DIR="$OPENSHIFT_HOMEDIR/php"
-cp -r $OPENSHIFT_PHP_DIR/versions/$version/configuration $OPENSHIFT_PHP_DIR
+mkdir -p $OPENSHIFT_PHP_DIR/configuration
+mkdir -p $OPENSHIFT_PHP_DIR/metadata
+cp -r $OPENSHIFT_PHP_DIR/versions/$version/configuration/* $OPENSHIFT_PHP_DIR/configuration
 cp -r $OPENSHIFT_PHP_DIR/versions/$version/metadata/* $OPENSHIFT_PHP_DIR/metadata
-cp -r $OPENSHIFT_PHP_DIR/versions/$versions/configuration $OPENSHIFT_PHP_DIR
 
 # Create additional directories required by PHP
 mkdir $OPENSHIFT_PHP_DIR/sessions
