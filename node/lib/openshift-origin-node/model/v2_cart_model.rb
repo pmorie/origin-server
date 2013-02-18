@@ -35,6 +35,7 @@ module OpenShift
     #
     # destroy()
     def destroy(*)
+      @logger.info('V2 destroy')
       cartridge_name = 'N/A'
       process_cartridges do |path|
         begin
@@ -337,7 +338,7 @@ module OpenShift
                                       chdir:           @user.homedir,
                                       uid:             @user.uid,
                                       expected_status: 0)
-      File.rm_r(cartridge_home)
+      FileUtils.rm_r(cartridge_home)
       @logger.info("Removed #{cartridge_name} for user #{@user.uuid} from #{cartridge_home}")
       out
     end
