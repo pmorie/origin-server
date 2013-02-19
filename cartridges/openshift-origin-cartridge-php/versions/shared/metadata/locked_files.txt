@@ -1,3 +1,4 @@
 .pearrc
-php-5.3/conf
-php-5.3/conf/*
+php/configuration/
+php/metadata/
+php/env
