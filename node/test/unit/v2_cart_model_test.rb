@@ -20,7 +20,6 @@
 module OpenShift; end
 
 require 'test_helper'
-require 'openshift-origin-node/model/application_container'
 require 'openshift-origin-node/model/v2_cart_model'
 require 'openshift-origin-node/model/cartridge'
 require 'openshift-origin-node/utils/environ'
@@ -61,19 +60,44 @@ class V2CartModelTest < Test::Unit::TestCase
 
     @model = OpenShift::V2CartridgeModel.new(@config, @user)
 
-    @mock_cartridge = OpenShift::Runtime::Cartridge.new({
-      "Name" => "mock",
-      "Namespace" => "MOCK",
-      "Endpoints" => [
-        "EXAMPLE_IP1:EXAMPLE_PORT1(8080):EXAMPLE_PUBLIC_PORT1",
-        "EXAMPLE_IP1:EXAMPLE_PORT2(8081):EXAMPLE_PUBLIC_PORT2",
-        "EXAMPLE_IP1:EXAMPLE_PORT3(8082):EXAMPLE_PUBLIC_PORT3",
-        "EXAMPLE_IP2:EXAMPLE_PORT4(9090):EXAMPLE_PUBLIC_PORT4",
-        "EXAMPLE_IP2:EXAMPLE_PORT5(9091)",
-      ]
-    })
+    @mock_manifest = %q{#
+        Name: mock
+        Namespace: MOCK
+        Display-Name: Mock
+        Description: "A mock cartridge for development use only."
+        Version: 0.1
+        License: "None"
+        Vendor: Red Hat
+        Categories:
+        - service
+        Provides:
+        - mock
+        Scaling:
+        Min: 1
+        Max: -1
+        Group-Overrides:
+        - components:
+        - mock
+        Endpoints:
+        - "EXAMPLE_IP1:EXAMPLE_PORT1(8080):EXAMPLE_PUBLIC_PORT1"
+        - "EXAMPLE_IP1:EXAMPLE_PORT2(8081):EXAMPLE_PUBLIC_PORT2"
+        - "EXAMPLE_IP1:EXAMPLE_PORT3(8082):EXAMPLE_PUBLIC_PORT3"
+        - "EXAMPLE_IP2:EXAMPLE_PORT4(9090):EXAMPLE_PUBLIC_PORT4"
+        - "EXAMPLE_IP2:EXAMPLE_PORT5(9091)"
+    }
 
+    @mock_cartridge = OpenShift::Runtime::Cartridge.new(YAML.load(@mock_manifest))
     @model.stubs(:get_cartridge).with("mock").returns(@mock_cartridge)
+  end
+
+  def test_get_cartridge_valid_manifest
+    local_model = OpenShift::V2CartridgeModel.new(@config, @user)
+    YAML.stubs(:load_file).with(any_parameters).returns(YAML.load(@mock_manifest))
+    cart = local_model.get_cartridge("mock")
+
+    assert_equal "mock", cart.name
+    assert_equal "MOCK", cart.namespace
+    assert_equal 5, cart.endpoints.length
   end
 
   def test_private_endpoint_create

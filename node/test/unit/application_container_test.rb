@@ -68,19 +68,34 @@ class ApplicationContainerTest < Test::Unit::TestCase
     @container = OpenShift::ApplicationContainer.new(@gear_uuid, @gear_uuid, @user_uid,
         @app_name, @gear_uuid, @namespace, nil, nil, nil)
 
-    @mock_cartridge = OpenShift::Runtime::Cartridge.new({
-      "Name" => "mock",
-      "Namespace" => "MOCK",
-      "Endpoints" => [
-        "EXAMPLE_IP1:EXAMPLE_PORT1(8080):EXAMPLE_PUBLIC_PORT1",
-        "EXAMPLE_IP1:EXAMPLE_PORT2(8081):EXAMPLE_PUBLIC_PORT2",
-        "EXAMPLE_IP1:EXAMPLE_PORT3(8082):EXAMPLE_PUBLIC_PORT3",
-        "EXAMPLE_IP2:EXAMPLE_PORT4(9090):EXAMPLE_PUBLIC_PORT4",
-        "EXAMPLE_IP2:EXAMPLE_PORT5(9091)",
-      ]
-    })
+    @mock_manifest = %q{#
+        Name: mock
+        Namespace: MOCK
+        Display-Name: Mock
+        Description: "A mock cartridge for development use only."
+        Version: 0.1
+        License: "None"
+        Vendor: Red Hat
+        Categories:
+        - service
+        Provides:
+        - mock
+        Scaling:
+        Min: 1
+        Max: -1
+        Group-Overrides:
+        - components:
+        - mock
+        Endpoints:
+        - "EXAMPLE_IP1:EXAMPLE_PORT1(8080):EXAMPLE_PUBLIC_PORT1"
+        - "EXAMPLE_IP1:EXAMPLE_PORT2(8081):EXAMPLE_PUBLIC_PORT2"
+        - "EXAMPLE_IP1:EXAMPLE_PORT3(8082):EXAMPLE_PUBLIC_PORT3"
+        - "EXAMPLE_IP2:EXAMPLE_PORT4(9090):EXAMPLE_PUBLIC_PORT4"
+        - "EXAMPLE_IP2:EXAMPLE_PORT5(9091)"
+    }
 
-    @container.cart_model.stubs(:get_cartridge).with("mock").returns(@mock_cartridge)
+    @mock_cartridge = OpenShift::Runtime::Cartridge.new(YAML.load(@mock_manifest))
+    @container.cartridge_model.stubs(:get_cartridge).with("mock").returns(@mock_cartridge)
   end
 
   def test_public_endpoints_create
@@ -130,7 +145,7 @@ class ApplicationContainerTest < Test::Unit::TestCase
 
     @container.stubs(:stop_gear).with('/foo')
     @container.stubs(:gear_level_tidy).with('/foo/git/app_name.git', '/foo/.tmp')
-    @container.cart_model.expects(:tidy)
+    @container.cartridge_model.expects(:tidy)
     @container.stubs(:start_gear)
 
     @container.stubs(:cartridge_model).returns(mock())
@@ -144,7 +159,7 @@ class ApplicationContainerTest < Test::Unit::TestCase
 
     @container.stubs(:stop_gear).with('/foo').raises(Exception.new)
     @container.stubs(:gear_level_tidy).with('/foo/git/app_name.git', '/foo/.tmp').never
-    @container.cart_model.expects(:tidy).never
+    @container.cartridge_model.expects(:tidy).never
     @container.stubs(:start_gear).never
 
     assert_raise Exception do

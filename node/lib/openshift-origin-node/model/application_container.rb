@@ -53,9 +53,9 @@ module OpenShift
       
       # When v2 is the default cartridge format flip the test...
       if build_model == :v1
-        @cart_model = V1CartridgeModel.new(@config, @user)
+        @cartridge_model = V1CartridgeModel.new(@config, @user)
       else
-        @cart_model = V2CartridgeModel.new(@config, @user)
+        @cartridge_model = V2CartridgeModel.new(@config, @user)
       end
     end
 
@@ -149,7 +149,7 @@ module OpenShift
     # are considered fatal.
     def create_public_endpoints(cart_name)
       env = Utils::Environ::for_gear(@user.homedir)
-      cart = @cart_model.get_cartridge(cart_name)
+      cart = @cartridge_model.get_cartridge(cart_name)
 
       proxy = OpenShift::FrontendProxyServer.new(@logger)
 
@@ -181,7 +181,7 @@ module OpenShift
     # and skipped.
     def delete_public_endpoints(cart_name)
       env = Utils::Environ::for_gear(@user.homedir)
-      cart = @cart_model.get_cartridge(cart_name)
+      cart = @cartridge_model.get_cartridge(cart_name)
 
       proxy = OpenShift::FrontendProxyServer.new(@logger)
 
