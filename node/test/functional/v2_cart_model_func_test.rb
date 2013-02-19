@@ -33,7 +33,7 @@ module OpenShift
       @files = %w{/tmp/a /tmp/b/}
 
       @user = mock('MockUser') do
-        stubs(:get_mcs_label).returns('c0,c1000')
+        stubs(:get_mcs_label).returns('s0:c0,c1000')
         stubs(:gid).returns(1000)
         stubs(:uid).returns(1000)
       end
