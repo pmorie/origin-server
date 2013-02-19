@@ -1,4 +1,4 @@
-@runtime
+@runtime_other
 Feature: V2 SDK Mock Cartridge
 
   Scenario: Add cartridge
