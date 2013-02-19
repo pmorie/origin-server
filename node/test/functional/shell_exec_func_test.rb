@@ -39,6 +39,16 @@ module OpenShift
       assert_equal Process.uid, stats.uid
     end
 
+    def test_run_as_expected_failure
+      skip 'run_as tests require root permissions' if 0 != Process.uid
+
+      uid          = 1000
+      out, err, rc = Utils.oo_spawn("/bin/false",
+                                    chdir: "/tmp",
+                                    uid:   uid)
+      assert_equal 1, rc
+    end
+
     def test_run_as_stdout
       skip "run_as tests require root permissions" if 0 != Process.uid
 
