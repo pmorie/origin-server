@@ -510,7 +510,7 @@ module OpenShift
 
       # TODO: temporary hack to deal w/ version ambiguity and 'mock' cart.
       Dir[File.join(@user.homedir, "*")].each do |cart_dir|
-        next if cart_dir.end_with?('app-root') ||
+        next if cart_dir.end_with?('app-root') || cart_dir.end_with?('git') ||
             (not File.directory? cart_dir)
         yield cart_dir
       end

@@ -8,3 +8,5 @@ Feature: V2 SDK Mock Plugin Cartridge
   Then the mock-plugin cartridge private endpoints will be exposed
   And the mock-plugin setup_version marker will exist
   And the mock-plugin setup_failure marker will not exist
+  And the mock-plugin MOCK_PLUGIN_EXAMPLE env entry will exist
+  And the mock-plugin MOCK_PLUGIN_SERVICE_URL env entry will exist

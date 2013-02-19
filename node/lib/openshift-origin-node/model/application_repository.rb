@@ -103,7 +103,7 @@ module OpenShift
                        chdir:               git_path,
                        expected_exitstatus: 0)
       rescue ShellExecutionException => e
-        FileUtils.rm_r(@path) if File.exits? @path
+        FileUtils.rm_r(@path) if File.exist? @path
 
         raise ShellExecutionException.new(
                   'Failed to clone application git repository from template repository',

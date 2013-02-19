@@ -42,7 +42,7 @@ Then /^the mock cartridge private endpoints will be exposed$/ do
   app_env_var_will_exist('MOCK_EXAMPLE_PORT4')
 end
 
-Then /^the mock-plugin private endpoints will be exposed$/ do
+Then /^the mock-plugin cartridge private endpoints will be exposed$/ do
   app_env_var_will_exist('MOCK_PLUGIN_EXAMPLE_IP1')
   app_env_var_will_exist('MOCK_PLUGIN_EXAMPLE_PORT1')
 end
