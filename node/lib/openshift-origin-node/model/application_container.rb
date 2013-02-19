@@ -35,12 +35,7 @@ module OpenShift
     include OpenShift::Utils::ShellExec
     include ActiveModel::Observing
 
-<<<<<<< HEAD
     attr_reader :uuid, :application_uuid, :user, :state, :container_name, :cartridge_model
-=======
-    attr_reader :uuid, :application_uuid, :user, :state, :container_name, :cart_model
->>>>>>> Test refactor and stdout NodeLogger support
-
 
     def initialize(application_uuid, container_uuid, user_uid = nil,
         app_name = nil, container_name = nil, namespace = nil, quota_blocks = nil, quota_files = nil, logger = nil)
@@ -58,9 +53,9 @@ module OpenShift
       
       # When v2 is the default cartridge format flip the test...
       if build_model == :v1
-        @cart_model = V1CartridgeModel.new(@config, @user, self, @logger)
+        @cart_model = V1CartridgeModel.new(@config, @user)
       else
-        @cart_model = V2CartridgeModel.new(@config, @user, self, @logger)
+        @cart_model = V2CartridgeModel.new(@config, @user)
       end
     end
 
@@ -87,20 +82,6 @@ module OpenShift
 
     def name
       @uuid
-    end
-
-    # Loads a cartridge from manifest for the given name.
-    #
-    # TODO: Caching?
-    def get_cartridge(cart_name)
-      begin
-        manifest_path = @cartridge_model.get_cart_manifest_path(cart_name)
-        manifest = YAML.load_file(manifest_path)
-        return OpenShift::Runtime::Cartridge.new(manifest)
-      rescue => e
-        @logger.error(e.backtrace)
-        raise "Failed to load cart manifest from #{manifest_path} for cart #{cart_name} in gear #{@uuid}: #{e.message}"
-      end
     end
 
     # Add cartridge to gear.  This method establishes the cartridge model
@@ -168,7 +149,7 @@ module OpenShift
     # are considered fatal.
     def create_public_endpoints(cart_name)
       env = Utils::Environ::for_gear(@user.homedir)
-      cart = get_cartridge(cart_name)
+      cart = @cart_model.get_cartridge(cart_name)
 
       proxy = OpenShift::FrontendProxyServer.new(@logger)
 
@@ -200,7 +181,7 @@ module OpenShift
     # and skipped.
     def delete_public_endpoints(cart_name)
       env = Utils::Environ::for_gear(@user.homedir)
-      cart = get_cartridge(cart_name)
+      cart = @cart_model.get_cartridge(cart_name)
 
       proxy = OpenShift::FrontendProxyServer.new(@logger)
 

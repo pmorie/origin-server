@@ -72,7 +72,7 @@ class V2CartModelTest < Test::Unit::TestCase
       ]
     })
 
-    @container.stubs(:get_cartridge).with("mock").returns(@mock_cartridge)
+    @container.cart_model.stubs(:get_cartridge).with("mock").returns(@mock_cartridge)
   end
 
   def test_private_endpoint_create

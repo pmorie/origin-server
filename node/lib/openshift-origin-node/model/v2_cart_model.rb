@@ -33,35 +33,40 @@ module OpenShift
 
     FILENAME_BLACKLIST = %W{.ssh .sandbox .tmp .env}
 
-    def initialize(config, user, gear, logger = nil)
+    def initialize(config, user)
       @config  = config
       @user    = user
-      @gear    = gear
-      @logger  = self.logger
       @timeout = 30
     end
 
-    def get_cart_manifest_path(cart_name)
-      # TODO: 
-      #
-      # In this WIP, V2 cartridges are installed to and loaded
-      # from 
-      #
-      # /usr/libexec/openshift/cartridges/v2
-      #
-      # The planned path on disk that V2 cartridges 
-      # will be installed to in the end-state of this WIP is
-      #
-      # /usr/libexec/openshift/v2/cartridges
-      #
-      # We need to determine whether CARTRIDGE_BASE_PATH can safely
-      # be used in V2 code.  It points directly to
-      #
-      # /usr/libexec/openshift/cartridges
-      #
-      File.join(@config.get('CARTRIDGE_BASE_PATH'), 'v2', cart_name, 'metadata', 'manifest.yml')
+    # Loads a cartridge from manifest for the given name.
+    #
+    # In this WIP, V2 cartridges are installed to and loaded
+    # from 
+    #
+    # /usr/libexec/openshift/cartridges/v2
+    #
+    # The planned path on disk that V2 cartridges 
+    # will be installed to in the end-state of this WIP is
+    #
+    # /usr/libexec/openshift/v2/cartridges
+    #
+    # We need to determine whether CARTRIDGE_BASE_PATH can safely
+    # be used in V2 code.  It points directly to
+    #
+    # /usr/libexec/openshift/cartridges
+    #
+    # TODO: Caching?
+    def get_cartridge(cart_name)
+      begin
+        manifest_path = File.join(@config.get('CARTRIDGE_BASE_PATH'), 'v2', cart_name, 'metadata', 'manifest.yml')
+        manifest = YAML.load_file(manifest_path)
+        return OpenShift::Runtime::Cartridge.new(manifest)
+      rescue => e
+        logger.error(e.backtrace)
+        raise "Failed to load cart manifest from #{manifest_path} for cart #{cart_name} in gear #{@user.uuid}: #{e.message}"
+      end
     end
-
 
     # destroy() -> nil
     #
@@ -71,14 +76,14 @@ module OpenShift
     #
     # destroy()
     def destroy(*)
-      @logger.info('V2 destroy')
+      logger.info('V2 destroy')
       cartridge_name = 'N/A'
       process_cartridges do |path|
         begin
           cartridge_name = File.basename(path)
           cartridge_teardown(cartridge_name)
         rescue Utils::ShellExecutionException => e
-          @logger.warn("Cartridge teardown operation failed on gear #{@gear.uuid} for cartridge #{cartridge_name}: #{e.message} (rc=#{e.rc})")
+          logger.warn("Cartridge teardown operation failed on gear #{@user.uuid} for cartridge #{cartridge_name}: #{e.message} (rc=#{e.rc})")
         end
       end
 
@@ -97,7 +102,7 @@ module OpenShift
       begin
         do_control('tidy')
       rescue Utils::ShellExecutionException => e
-        @logger.warn("Cartridge tidy operation failed on gear #{@gear.uuid} for cart #{cartridge_name}: #{e.message} (rc=#{e.rc})")
+        logger.warn("Cartridge tidy operation failed on gear #{@user.uuid} for cart #{cartridge_name}: #{e.message} (rc=#{e.rc})")
       end
     end
 
@@ -129,7 +134,7 @@ module OpenShift
         OpenShift::FrontendHttpServer.new(@user.container_uuid, @user.container_name, @user.namespace).reload_httpd
       end
 
-      @logger.info "configure output: #{output}"
+      logger.info "configure output: #{output}"
       output
     end
 
@@ -255,7 +260,7 @@ module OpenShift
     #
     #   v2_cart_model.create_cartridge_directory('php-5.3')
     def create_cartridge_directory(cartridge_name)
-      @logger.info("Creating cartridge directory for #{cartridge_name}")
+      logger.info("Creating cartridge directory for #{cartridge_name}")
       # TODO: resolve correct location of v2 carts
       base = File.join(@config.get('CARTRIDGE_BASE_PATH'), 'v2', cartridge_name)
 
@@ -265,7 +270,7 @@ module OpenShift
       Utils.oo_spawn(
           "chcon -R --reference=#{@user.homedir} #{File.join(@user.homedir, cartridge_name)}",
           expected_exitstatus: 0)
-      @logger.info("Created cartridge directory for #{cartridge_name}")
+      logger.info("Created cartridge directory for #{cartridge_name}")
       nil
     end
 
@@ -274,21 +279,21 @@ module OpenShift
     end
 
     def populate_gear_repo(cartridge_name, template_git_url = nil)
-      @logger.info "Creating gear repo for #{cartridge_name}"
+      logger.info "Creating gear repo for #{cartridge_name}"
       repo = ApplicationRepository.new(@user)
       if template_git_url.nil?
         repo.populate_from_cartridge(cartridge_name)
       else
         raise NotImplementedError('populating repo from URL unsupported')
       end
-      @logger.info "Created gear repo for #{cartridge_name}"
+      logger.info "Created gear repo for #{cartridge_name}"
     end
 
     # process_erb_templates(cartridge_name) -> nil
     #
     # Search cartridge for any remaining <code>erb</code> files render them
     def process_erb_templates(cartridge_name)
-      @logger.info "Processing ERB templates for #{cartridge_name}"
+      logger.info "Processing ERB templates for #{cartridge_name}"
       env = Utils::Environ.for_gear(@user.homedir)
       render_erbs(env, File.join(@user.homedir, cartridge_name, '**'))
     end
@@ -301,7 +306,7 @@ module OpenShift
     #
     #   stdout = cartridge_setup('php-5.3')
     def cartridge_setup(cartridge_name, version=nil)
-      @logger.info "Running setup for #{cartridge_name}"
+      logger.info "Running setup for #{cartridge_name}"
       # FIXME: Where?
       # setup IP Addresses
 
@@ -327,8 +332,8 @@ module OpenShift
       raise Utils::ShellExecutionException.new(
                 "Failed to execute: #{setup} for #{@user.uuid} in #{@user.homedir}",
                 rc, out, err) unless 0 == rc
-      @logger.info("Ran setup for #{cartridge_name} for user #{@user.uuid} in #{cartridge_home}")
-      @logger.info("Setup output: #{out}")
+      logger.info("Ran setup for #{cartridge_name} for user #{@user.uuid} in #{cartridge_home}")
+      logger.info("Setup output: #{out}")
       out
     end
 
@@ -372,7 +377,7 @@ module OpenShift
                                       uid:             @user.uid,
                                       expected_status: 0)
       FileUtils.rm_r(cartridge_home)
-      @logger.info("Removed #{cartridge_name} for user #{@user.uuid} from #{cartridge_home}")
+      logger.info("Removed #{cartridge_name} for user #{@user.uuid} from #{cartridge_home}")
       out
     end
 
@@ -382,8 +387,8 @@ module OpenShift
     # Returns nil on success, or raises an exception if any errors occur: all errors
     # here are considered fatal.
     def create_private_endpoints(cart_name)
-      @logger.info "Creating private endpoints for #{cart_name}"
-      cart = @gear.get_cartridge(cart_name)
+      logger.info "Creating private endpoints for #{cart_name}"
+      cart = get_cartridge(cart_name)
 
       allocated_ips = {}
 
@@ -396,7 +401,7 @@ module OpenShift
           private_ip = find_open_ip(endpoint.private_port)
 
           if private_ip == nil
-            raise "No IP was available to create endpoint for cart #{cart.name} in gear #{@gear.uuid}: "\
+            raise "No IP was available to create endpoint for cart #{cart.name} in gear #{@user.uuid}: "\
               "#{endpoint.private_ip_name}(#{endpoint.private_port})"
           end
 
@@ -414,11 +419,11 @@ module OpenShift
 
         @user.add_env_var(endpoint.private_port_name, endpoint.private_port)
 
-        @logger.info("Created private endpoint for cart #{cart.name} in gear #{@gear.uuid}: "\
+        logger.info("Created private endpoint for cart #{cart.name} in gear #{@user.uuid}: "\
           "[#{endpoint.private_ip_name}=#{private_ip}, #{endpoint.private_port_name}=#{endpoint.private_port}]")
       end
 
-      @logger.info "Created private endpoints for #{cart_name}"
+      logger.info "Created private endpoints for #{cart_name}"
     end
 
     # TODO: How should this be implemented?
@@ -437,7 +442,7 @@ module OpenShift
     # for the given port, or returns nil if IP is available.
     def find_open_ip(port)
       allocated_ips = get_allocated_private_ips
-      @logger.debug("IPs already allocated for #{port} in gear #{@gear.uuid}: #{allocated_ips}")
+      logger.debug("IPs already allocated for #{port} in gear #{@user.uuid}: #{allocated_ips}")
 
       open_ip = nil
 
@@ -449,7 +454,7 @@ module OpenShift
 
         # Check to ensure the IP/port is not currently bound to another process
         if address_bound?(candidate_ip, port)
-          @logger.debug("Candidate address #{candidate_ip}:#{port} is unallocated by the gear
+          logger.debug("Candidate address #{candidate_ip}:#{port} is unallocated by the gear
             but is already bound to another process and will be skipped")
           next
         end
@@ -479,7 +484,7 @@ module OpenShift
       # Collect all existing endpoint IP allocations
       process_cartridges do |cart_path|
         cart_name = File.basename(cart_path)
-        cart      = @gear.get_cartridge(cart_name)
+        cart      = get_cartridge(cart_name)
 
         cart.endpoints.each do |endpoint|
           # TODO: If the private IP variable exists but the value isn't in

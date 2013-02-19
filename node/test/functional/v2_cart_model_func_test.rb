@@ -38,7 +38,7 @@ module OpenShift
         stubs(:uid).returns(1000)
       end
 
-      @model = V2CartridgeModel.new(nil, @user, nil)
+      @model = V2CartridgeModel.new(nil, @user)
     end
 
     def teardown
