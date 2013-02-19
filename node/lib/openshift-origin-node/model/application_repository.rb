@@ -54,9 +54,13 @@ module OpenShift
 
       have_template = (File.exist? cartridge_template or File.exist? cartridge_template_git)
 
-      raise ArgumentError.new(
-                "No template for application git repository found"
-            ) unless have_template
+      # TODO: account for case where a cartridge doesn't supply a template
+      # and isn't supposed to, ie, a plugin cart.
+      #raise ArgumentError.new(
+      #          "No template for application git repository found"
+      #      ) unless have_template
+
+      return nil unless have_template
 
       # TODO: Support tar balls etc...
       raise NotImplementedError.new(
