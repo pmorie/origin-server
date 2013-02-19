@@ -1,3 +1,7 @@
+Given /^a v2 default node$/ do
+  assert_file_exists '/var/lib/openshift/.settings/v2_cartridge_format'
+end
+
 Then /^the mock ([^ ]+) marker will( not)? exist$/ do |marker, negate|
   marker_file = File.join($home_root, @gear.uuid, 'app-root', 'data', '.mock_cartridge_state', marker)
 
