@@ -2,8 +2,10 @@ Given /^a v2 default node$/ do
   assert_file_exists '/var/lib/openshift/.settings/v2_cartridge_format'
 end
 
-Then /^the mock ([^ ]+) marker will( not)? exist$/ do |marker, negate|
-  marker_file = File.join($home_root, @gear.uuid, 'app-root', 'data', '.mock_cartridge_state', marker)
+Then /^the ([^ ]+) ([^ ]+) marker will( not)? exist$/ do |cartridge_name, marker, negate|
+  state_dir = ".#{cartridge_name.sub('-', '_')}_cartridge_state"
+
+  marker_file = File.join($home_root, @gear.uuid, 'app-root', 'data', state_dir, marker)
 
   if negate
     assert_file_not_exists marker_file
@@ -12,8 +14,8 @@ Then /^the mock ([^ ]+) marker will( not)? exist$/ do |marker, negate|
   end
 end
 
-Then /^the mock ([^ ]+) env entry will( not)? exist$/ do |variable, negate|
-  cart_env_var_will_exist('mock', variable)
+Then /^the ([^ ]+) ([^ ]+) env entry will( not)? exist$/ do |cartridge_name, variable, negate|
+  cart_env_var_will_exist(cartridge_name, variable)
 end
 
 Then /^the platform-created default environment variables will exist$/ do
@@ -38,6 +40,11 @@ Then /^the mock cartridge private endpoints will be exposed$/ do
   app_env_var_will_exist('MOCK_EXAMPLE_PORT2')
   app_env_var_will_exist('MOCK_EXAMPLE_PORT3')
   app_env_var_will_exist('MOCK_EXAMPLE_PORT4')
+end
+
+Then /^the mock-plugin private endpoints will be exposed$/ do
+  app_env_var_will_exist('MOCK_PLUGIN_EXAMPLE_IP1')
+  app_env_var_will_exist('MOCK_PLUGIN_EXAMPLE_PORT1')
 end
 
 def app_env_var_will_exist(var_name, prefix = true)
