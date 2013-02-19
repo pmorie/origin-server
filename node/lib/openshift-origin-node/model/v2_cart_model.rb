@@ -275,7 +275,10 @@ module OpenShift
     end
 
     def delete_cartridge_directory(cartridge_name)
-      FileUtils.rm_r(File.join(@user.homedir, cartridge_name))
+      logger.info("Deleting cartridge directory for #{cartridge_name}")
+      # TODO: rm_rf correct?
+      FileUtils.rm_rf(File.join(@user.homedir, cartridge_name))
+      logger.info("Deleted cartridge directory for #{cartridge_name}")
     end
 
     def populate_gear_repo(cartridge_name, template_git_url = nil)
@@ -377,7 +380,7 @@ module OpenShift
                                       uid:             @user.uid,
                                       expected_status: 0)
       FileUtils.rm_r(cartridge_home)
-      logger.info("Removed #{cartridge_name} for user #{@user.uuid} from #{cartridge_home}")
+      logger.info("Ran teardown for #{cartridge_name} for user #{@user.uuid} from #{cartridge_home}")
       out
     end
 
