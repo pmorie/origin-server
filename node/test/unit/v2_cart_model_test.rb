@@ -119,6 +119,21 @@ class V2CartModelTest < Test::Unit::TestCase
     
     @model.create_private_endpoints("mock")
   end
+
+  def test_private_endpoint_delete
+    @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP1")
+    @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT1")
+    @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP1")
+    @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT2")
+    @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP1")
+    @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT3")
+    @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP2")
+    @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT4")
+    @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP2")
+    @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT5")
+    
+    @model.delete_private_endpoints("mock")
+  end
  
   # Verifies that an IP can be allocated for a simple port binding request
   # where no other IPs are allocated to any carts in a gear.

@@ -275,7 +275,7 @@ module OpenShift
     end
 
     def delete_cartridge_directory(cartridge_name)
-      File.rm_r(File.join(@user.homedir, cartridge_name))
+      FileUtils.rm_r(File.join(@user.homedir, cartridge_name))
     end
 
     def populate_gear_repo(cartridge_name, template_git_url = nil)
@@ -428,7 +428,15 @@ module OpenShift
 
     # TODO: How should this be implemented?
     def delete_private_endpoints(cart_name)
-      raise "Not implemented"
+      logger.info "Deleting private endpoints for #{cart_name}"
+      cart = get_cartridge(cart_name)
+
+      cart.endpoints.each do |endpoint|
+        @user.remove_env_var(endpoint.private_ip_name)
+        @user.remove_env_var(endpoint.private_port_name)
+      end
+
+      logger.info "Deleted private endpoints for #{cart_name}"
     end
 
     # Finds the next IP address available for binding of the given port for
