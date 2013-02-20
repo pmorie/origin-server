@@ -98,6 +98,7 @@ module OpenShift
                     grandchild = Kernel.spawn(options[:env], cmd, opts)
 
                     _, status = Process.wait2 grandchild
+                    NodeLogger.logger.debug { "oo_spawn ran #{command}: #{status.exitstatus}" }
                     exit!(status.exitstatus)
                   end
                 else
@@ -157,6 +158,7 @@ module OpenShift
               buffer = (fd == stdout) ? out : err
               begin
                 buffer << fd.readpartial(options[:buffer_size])
+                NodeLogger.logger.debug{ "oo_spawn buffer(#{fd.fileno}/#{fd.pid}) #{buffer}"}
               rescue Errno::EAGAIN, Errno::EINTR
               rescue EOFError
                 readers.delete(fd)

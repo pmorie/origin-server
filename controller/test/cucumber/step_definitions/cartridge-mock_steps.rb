@@ -9,7 +9,7 @@ Then /^the ([^ ]+) ([^ ]+) marker will( not)? exist$/ do |cartridge_name, marker
 
   if negate
     assert_file_not_exists marker_file
-  else 
+  else
     assert_file_exists marker_file
   end
 end
@@ -79,4 +79,5 @@ def cart_env_var_will_exist(cart_name, var_name)
   var_file_path = File.join($home_root, @gear.uuid, cart_name, 'env', var_name)
 
   assert_file_exists var_file_path
+  assert((File.stat(var_file_path).size > 0), "#{var_file_path} is empty")
 end

@@ -70,6 +70,7 @@ module OpenShift
       # expose variables for ERB processing
       @application_name = @user.app_name
       @cartridge_name   = cartridge_name
+      @user_homedir     = @user.homedir
 
       # FIXME: See below
       @broker_host      = @config.get('BROKER_HOST')
@@ -81,6 +82,7 @@ module OpenShift
           pull_bare_repository(cartridge_template_git)
       end
       configure_repository
+      deploy_repository
     end
 
     ##
@@ -112,11 +114,16 @@ module OpenShift
         raise ShellExecutionException.new(
                   'Failed to clone application git repository from template repository',
                   e.rc, e.stdout, e.stderr)
-      else
-        configure_repository()
       ensure
         FileUtils.rm_r(template)
       end
+    end
+
+    def deploy_repository
+      Utils.oo_spawn(ERB.new(GIT_DEPLOY).result(binding),
+                     chdir:               @path,
+                     uid:                 @user.uid,
+                     expected_exitstatus: 0)
     end
 
     ##
@@ -157,6 +164,12 @@ git </dev/null clone --bare --no-hardlinks template <%= @application_name %>.git
 GIT_DIR="./<%= @application_name %>.git" git repack
 }
 
+    # TODO: submodule support
+    GIT_DEPLOY      = %Q{\
+set -xe;
+git archive --format=tar HEAD | (cd <%= @user_homedir %>/app-root/runtime/repo && tar --warning=no-timestamp -xf -);
+}
+
     GIT_DESCRIPTION = %Q{\
 <%= @cartridge_name %> application <%= @application_name %>
 }
@@ -170,7 +183,7 @@ GIT_DIR="./<%= @application_name %>.git" git repack
 
     LOAD_ENV = %Q{\
 # Import Environment Variables
-for f in /etc/openshift/env/* ~/.env/* ~/*-*/env/*
+for f in /etc/openshift/env/* ~/.env/* ~/*/env/*
 do
   [ -f $f ] && . $f
 done

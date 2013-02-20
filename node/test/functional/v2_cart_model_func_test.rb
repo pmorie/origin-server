@@ -47,7 +47,7 @@ module OpenShift
     end
 
     def test_do_unlock_gear
-      @model.do_unlock_gear(@files)
+      @model.do_unlock(@files)
 
       assert File.file?('/tmp/a'), 'Unlock failed to create file'
       assert File.directory?('/tmp/b'), 'Unlock failed to create directory'
@@ -57,7 +57,7 @@ module OpenShift
       FileUtils.touch('/tmp/a')
       FileUtils.mkpath('/tmp/b')
 
-      @model.do_lock_gear(@files)
+      @model.do_lock(@files)
 
       assert File.file?('/tmp/a'), 'Lock failed to create file'
       assert File.directory?('/tmp/b'), 'Lock failed to create directory'

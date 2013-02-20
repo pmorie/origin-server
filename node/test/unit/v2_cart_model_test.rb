@@ -116,7 +116,7 @@ class V2CartModelTest < Test::Unit::TestCase
     @user.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP2", ip2)
     @user.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT4", 9090)
     @user.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT5", 9091)
-    
+
     @model.create_private_endpoints("mock")
   end
 
@@ -131,10 +131,10 @@ class V2CartModelTest < Test::Unit::TestCase
     @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT4")
     @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP2")
     @user.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT5")
-    
+
     @model.delete_private_endpoints("mock")
   end
- 
+
   # Verifies that an IP can be allocated for a simple port binding request
   # where no other IPs are allocated to any carts in a gear.
   def test_find_open_ip_success
@@ -185,7 +185,7 @@ class V2CartModelTest < Test::Unit::TestCase
   # Flow control for destroy success - cartridge_teardown called for each method
   # and unix user destroyed.
   def test_destroy_success
-    @model.expects(:process_cartridges).multiple_yields(%w(/var/lib/openshift/0001000100010001/cartridge1), 
+    @model.expects(:process_cartridges).multiple_yields(%w(/var/lib/openshift/0001000100010001/cartridge1),
                                                         %w(/var/lib/openshift/0001000100010001/cartridge2))
     @model.expects(:cartridge_teardown).with('cartridge1')
     @model.expects(:cartridge_teardown).with('cartridge2')
@@ -198,7 +198,7 @@ class V2CartModelTest < Test::Unit::TestCase
   # Verifies that all teardown hooks are called, even if one raises an error,
   # and that unix user is still destroyed.
   def test_destroy_teardown_raises
-    @model.expects(:process_cartridges).multiple_yields(%w(/var/lib/openshift/0001000100010001/cartridge1), 
+    @model.expects(:process_cartridges).multiple_yields(%w(/var/lib/openshift/0001000100010001/cartridge1),
                                                         %w(/var/lib/openshift/0001000100010001/cartridge2))
     @model.expects(:cartridge_teardown).with('cartridge1').raises(OpenShift::Utils::ShellExecutionException.new('error'))
     @model.expects(:cartridge_teardown).with('cartridge2')
@@ -211,12 +211,12 @@ class V2CartModelTest < Test::Unit::TestCase
   # with cartridge name, do_unlock_gear and do_lock_gear bound the call.
   def test_unlock_gear_success
     @model.expects(:lock_files).with('mock-0.1').returns(%w(file1 file2 file3))
-    @model.expects(:do_unlock_gear).with(%w(file1 file2 file3))
-    @model.expects(:do_lock_gear).with(%w(file1 file2 file3))
+    @model.expects(:do_unlock).with(%w(file1 file2 file3))
+    @model.expects(:do_lock).with(%w(file1 file2 file3))
 
     params = []
     @model.unlock_gear('mock-0.1') { |cart_name| params << cart_name }
-    
+
     assert_equal 1, params.size
     assert_equal 'mock-0.1', params[0]
   end
@@ -226,10 +226,10 @@ class V2CartModelTest < Test::Unit::TestCase
   # out to caller.
   def test_unlock_gear_block_raises
     @model.expects(:lock_files).with('mock-0.1').returns(%w(file1 file2 file3))
-    @model.expects(:do_unlock_gear).with(%w(file1 file2 file3))
-    @model.expects(:do_lock_gear).with(%w(file1 file2 file3))
+    @model.expects(:do_unlock).with(%w(file1 file2 file3))
+    @model.expects(:do_lock).with(%w(file1 file2 file3))
 
-    assert_raise OpenShift::Utils::ShellExecutionException do 
+    assert_raise OpenShift::Utils::ShellExecutionException do
       @model.unlock_gear('mock-0.1') { raise OpenShift::Utils::ShellExecutionException.new('error') }
     end
   end
