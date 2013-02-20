@@ -131,7 +131,6 @@ module OpenShift
         process_erb_templates(cartridge_name)
 
         do_control('start', cartridge_name)
-        OpenShift::FrontendHttpServer.new(@user.container_uuid, @user.container_name, @user.namespace).reload_httpd
       end
 
       logger.info "configure output: #{output}"
@@ -150,8 +149,6 @@ module OpenShift
         unlock_gear(cartridge_name) { |c| cartridge_teardown(c) }
         delete_cartridge_directory(cartridge_name)
       end
-
-      OpenShift::FrontendHttpServer.new(@user.container_uuid, @user.container_name, @user.namespace).reload_httpd
 
       nil
     end
