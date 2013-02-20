@@ -2,8 +2,6 @@
 set -u
 set -x
 
-exec &> /tmp/phpnew.log
-
 PATH=/bin:/usr/bin:$PATH
 
 version=5.3
