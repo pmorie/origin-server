@@ -47,6 +47,11 @@ Then /^the mock-plugin cartridge private endpoints will be exposed$/ do
   app_env_var_will_exist('MOCK_PLUGIN_EXAMPLE_PORT1')
 end
 
+Then /^the mock-plugin cartridge private endpoints will be concealed$/ do
+  app_env_var_will_not_exist('MOCK_PLUGIN_EXAMPLE_IP1')
+  app_env_var_will_not_exist('MOCK_PLUGIN_EXAMPLE_PORT1')
+end
+
 def app_env_var_will_exist(var_name, prefix = true)
   if prefix
     var_name = "OPENSHIFT_#{var_name}"
@@ -56,6 +61,17 @@ def app_env_var_will_exist(var_name, prefix = true)
 
   assert_file_exists var_file_path
 end
+
+def app_env_var_will_not_exist(var_name, prefix = true)
+  if prefix
+    var_name = "OPENSHIFT_#{var_name}"
+  end
+
+  var_file_path = File.join($home_root, @gear.uuid, '.env', var_name)
+
+  assert_file_not_exists var_file_path
+end
+
 
 def cart_env_var_will_exist(cart_name, var_name)
   var_name = "OPENSHIFT_#{var_name}"

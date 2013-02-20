@@ -12,4 +12,5 @@ Feature: V2 SDK Mock Plugin Cartridge
   And the mock-plugin MOCK_PLUGIN_SERVICE_URL env entry will exist
   When I remove the mock-plugin cartridge from the application
   Then the mock-plugin teardown_called marker will exist
+  And the mock-plugin cartridge private endpoints will be concealed
   
