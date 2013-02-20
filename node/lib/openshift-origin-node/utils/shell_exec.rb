@@ -1,12 +1,12 @@
 #--
 # Copyright 2010-2013 Red Hat, Inc.
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,7 +28,7 @@ module OpenShift
       attr_accessor :rc, :stdout, :stderr
       def initialize(msg, rc=-1, stdout = nil, stderr = nil)
         super msg
-        self.rc = rc 
+        self.rc = rc
         self.stdout = stdout
         self.stderr = stderr
       end
@@ -71,50 +71,51 @@ module OpenShift
     def self.oo_spawn(command, options = {})
       opts                   = {}
       opts[:chdir]           = (options[:chdir] ||= '.')
-      opts[:unsetenv_others] = options[:unsetenv_others] ||= false
+      opts[:unsetenv_others] = (options[:unsetenv_others] ||= false)
       opts[:close_others]    = true
       options[:env]          ||= {}
       options[:gid]          ||= options[:uid]
       options[:timeout]      ||= 3600
       options[:buffer_size]  ||= 32768
 
-      IO.pipe { |read_stderr, write_stderr|
-        IO.pipe { |read_stdout, write_stdout|
-          opts[:in]    = :close
-          opts[:out]   = write_stdout
-          opts[:err]   = write_stderr
+      IO.pipe do |read_stderr, write_stderr|
+        IO.pipe do |read_stdout, write_stdout|
+          opts[:in]  = :close
+          opts[:out] = write_stdout
+          opts[:err] = write_stderr
 
-          fork_pid = nil
-          pid      = 0
-          if options[:uid]
-            # lazy init otherwise we end up with a cyclic require...
-            require 'openshift-origin-node/model/unix_user'
+          pid = if options[:uid]
+                  # lazy init otherwise we end up with a cyclic require...
+                  require 'openshift-origin-node/model/unix_user'
 
-            mcs_level = OpenShift::UnixUser.get_mcs_label options[:uid]
-            cmd = %Q{/usr/bin/runcon -r system_r -t openshift_t -l #{mcs_level} /bin/bash -c "#{command}"}
-            NodeLogger.logger.debug { "oo_spawn running #{cmd}" }
+                  mcs_level = OpenShift::UnixUser.get_mcs_label options[:uid]
+                  cmd       = %Q{/usr/bin/runcon -r system_r -t openshift_t -l #{mcs_level} /bin/bash -c "#{command}"}
+                  NodeLogger.logger.debug { "oo_spawn running #{cmd}" }
 
-            fork_pid = fork {
-              Process::GID.change_privilege(options[:gid].to_i)
-              Process::UID.change_privilege(options[:uid].to_i)
-              pid = Kernel.spawn(options[:env], cmd, opts)
-            }
-          else
-            NodeLogger.logger.debug { "oo_spawn running #{command}" }
-            pid = Kernel.spawn(options[:env], command, opts)
-            unless pid
-              raise OpenShift::Utils::ShellExecutionException.new(
-                        "Shell command '#{command}' fork failed in spawn().")
-            end
+                  fork do
+                    Process::GID.change_privilege(options[:gid].to_i)
+                    Process::UID.change_privilege(options[:uid].to_i)
+                    grandchild = Kernel.spawn(options[:env], cmd, opts)
+
+                    _, status = Process.wait2 grandchild
+                    exit!(status.exitstatus)
+                  end
+                else
+                  NodeLogger.logger.debug { "oo_spawn running #{command}" }
+                  Kernel.spawn(options[:env], command, opts)
+                end
+
+          unless pid
+            raise OpenShift::Utils::ShellExecutionException.new(
+                      "Shell command '#{command}' fork failed in spawn().")
           end
 
           begin
             write_stdout.close
             write_stderr.close
-            out, err  = read_results(read_stdout, read_stderr, options)
-            _, status = Process.wait2 pid
+            out, err = read_results(read_stdout, read_stderr, options)
 
-            exit!(status.exitstatus) if (options[:uid] && fork_pid.nil?)
+            _, status = Process.wait2 pid
 
             if (!options[:expected_exitstatus].nil?) && (status.exitstatus != options[:expected_exitstatus])
               raise OpenShift::Utils::ShellExecutionException.new(
@@ -128,8 +129,8 @@ module OpenShift
             raise OpenShift::Utils::ShellExecutionException.new(
                       "Shell command '#{command}'' exceeded timeout of #{e.seconds}", -1, out, err)
           end
-        }
-      }
+        end
+      end
     end
 
     private
@@ -192,7 +193,7 @@ module OpenShift::Utils
     #
     # Returns An Array with [stdout, stderr, return_code]
     def self.shellCmd(cmd, pwd = ".", ignore_err = true, expected_rc = 0, timeout = 3600)
-      out = err = rc = nil         
+      out = err = rc = nil
       begin
         # Using Open4 spawn with cwd isn't thread safe
         m_cmd = "cd #{pwd} && ( #{cmd} )"
@@ -221,7 +222,7 @@ module OpenShift::Utils
                     "Shell command '#{cmd}'' timed out (timeout is #{timeout})", -1, out, err)
         ensure
           stdout.close
-          stderr.close  
+          stderr.close
           rc = Process::waitpid2(pid)[1].exitstatus
         end
       rescue Exception => e
@@ -229,7 +230,7 @@ module OpenShift::Utils
                                                       ) unless ignore_err
       end
 
-      if !ignore_err and rc != expected_rc 
+      if !ignore_err and rc != expected_rc
         raise OpenShift::Utils::ShellExecutionException.new(
           "Shell command '#{cmd}' returned an error. rc=#{rc}", rc, out, err)
       end
