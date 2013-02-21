@@ -20,14 +20,14 @@ module OpenShift
   module NodeLogger
     PROFILES = {
       :standard => {
-        file_config: 'OPENSHIFT_NODE_LOG_FILE',
-        level_config: 'OPENSHIFT_NODE_LOG_LEVEL',
+        file_config: 'PLATFORM_LOG_FILE',
+        level_config: 'PLATFORM_LOG_LEVEL',
         default_file: File.join(File::SEPARATOR, %w{var log openshift node platform.log}),
         default_level: Logger::DEBUG
       },
       :trace => {
-        file_config: 'OPENSHIFT_NODE_TRACE_LOG_FILE',
-        level_config: 'OPENSHIFT_NODE_TRACE_LOG_LEVEL',
+        file_config: 'PLATFORM_TRACE_LOG_FILE',
+        level_config: 'PLATFORM_TRACE_LOG_LEVEL',
         default_file: File.join(File::SEPARATOR, %w{var log openshift node platform-trace.log}),
         default_level: Logger::INFO
       }
@@ -64,7 +64,7 @@ module OpenShift
                else
                  File.open(log_file, File::WRONLY | File::APPEND| File::CREAT, 0644)
                end
-               
+
         logger = Logger.new(file, 5, 10 * 1024 * 1024)
         logger.level = log_level
         logger
