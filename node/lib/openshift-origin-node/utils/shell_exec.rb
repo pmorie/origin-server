@@ -158,7 +158,6 @@ module OpenShift
               buffer = (fd == stdout) ? out : err
               begin
                 buffer << fd.readpartial(options[:buffer_size])
-                NodeLogger.logger.debug{ "oo_spawn buffer(#{fd.fileno}/#{fd.pid}) #{buffer}"}
               rescue Errno::EAGAIN, Errno::EINTR
               rescue EOFError
                 readers.delete(fd)
