@@ -7,8 +7,6 @@ source ~/.env/*
 
 source /usr/libexec/openshift/cartridges/v2/mock/mock.conf
 
-echo "PATH = $PATH"
-
 rm -rf $MOCK_STATE/
 mkdir $MOCK_STATE
 touch $MOCK_STATE/setup_called
@@ -19,12 +17,18 @@ function error_exit {
   exit $2
 }
 
-echo "OPENSHIFT_DATA_DIR: $OPENSHIFT_DATA_DIR"
+case "$1" in
+  -v|--version)
+    version="$2"
+esac
 
-version=0.1
-
-echo "Version: $version" >$MOCK_STATE/setup_version
-echo "export OPENSHIFT_MOCK_VERSION=\'$version\'" > mock/env/OPENSHIFT_MOCK_VERSION
+if [[ -n "$version" ]]; then
+  echo "Creating version marker for $version"
+  echo "$version" > $MOCK_STATE/setup_version
+  echo "export OPENSHIFT_MOCK_VERSION=\'$version\'" > $OPENSHIFT_HOMEDIR/mock-$version/env/OPENSHIFT_MOCK_VERSION
+else
+  echo "Skipping version creation marker."
+fi
 
 touch $MOCK_STATE/setup_succeed
 
