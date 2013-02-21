@@ -1,7 +1,7 @@
 @runtime_other
 Feature: V2 SDK Mock Cartridge
 
-  Scenario: Add cartridge
+  Scenario: Exercise basic platform functionality
   Given a v2 default node
   Given a new mock type application
   Then the application git repo will exist
@@ -12,37 +12,21 @@ Feature: V2 SDK Mock Cartridge
   And the mock MOCK_EXAMPLE env entry will exist
   And the mock MOCK_SERVICE_URL env entry will exist
 
-  Scenario: Destroy application
-  Given a v2 default node
-  Given a new mock type application
-  When I destroy the application
-  Then the application git repo will not exist
-
-  Scenario: Start application
-  Given a v2 default node
-  Given a new mock type application
   When I start the application
   Then the mock control_start marker will exist
 
-  Scenario: Stop application
-  Given a v2 default node
-  Given a new mock type application
-  When I start the application
-  Then the mock control_start marker will exist
-  When I stop the application
-  Then the mock control_stop marker will exist
-
-  Scenario: Application status
-  Given a v2 default node
-  Given a new mock type application
   When I status the application
   Then the mock control_status marker will exist
 
-  Scenario: Restart application
-  Given a v2 default node
-  Given a new mock type application
+  When I stop the application
+  Then the mock control_stop marker will exist
+
   When I restart the application
   Then the mock control_restart marker will exist  
+
+  When I destroy the application
+  Then the application git repo will not exist
+ 
 
   # Scenario: Update application
 
