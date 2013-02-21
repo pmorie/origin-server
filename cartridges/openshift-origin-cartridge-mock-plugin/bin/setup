@@ -7,8 +7,6 @@ source ~/.env/*
 
 source /usr/libexec/openshift/cartridges/v2/mock-plugin/mock-plugin.conf
 
-PATH=/bin/:/usr/bin:$PATH
-
 echo "PATH = $PATH"
 
 rm -rf $MOCK_STATE/

@@ -122,25 +122,17 @@ module OpenShift
       OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
       OpenShift::Utils::Cgroups::with_cgroups_disabled(@user.uuid) do
         create_cartridge_directory(cartridge_name)
+        create_private_endpoints(cartridge_name)
 
-        begin
-          do_unlock([@user.homedir])
-          create_standard_env_vars(cartridge_name)
-          create_private_endpoints(cartridge_name)
+        Dir.chdir(@user.homedir) do
+          unlock_gear(cartridge_name) do |c|
+            output << cartridge_setup(c)
+            populate_gear_repo(c, template_git_url)
 
-          Dir.chdir(@user.homedir) do
-            unlock_gear(cartridge_name) do |c|
-              output << cartridge_setup(c)
-              populate_gear_repo(c, template_git_url)
-
-              process_erb_templates(cartridge_name)
-            end
+            process_erb_templates(cartridge_name)
           end
-          do_control('start', cartridge_name)
-        ensure
-          do_lock([@user.homedir])
         end
-
+        do_control('start', cartridge_name)
 
         logger.info "configure output: #{output}"
         output

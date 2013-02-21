@@ -75,9 +75,8 @@ module OpenShift
 
         files = @model.lock_files('mock')
 
-        assert_equal(
-            [File.join(@homedir, 'mock/c'), File.join(@homedir, 'mock/d/')],
-            files)
+        expected = [@homedir, File.join(@homedir, 'mock/c'), File.join(@homedir, 'mock/d/')]
+        assert_equal(expected, files)
       end
     end
 

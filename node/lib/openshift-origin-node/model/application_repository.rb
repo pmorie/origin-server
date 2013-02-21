@@ -34,9 +34,12 @@ module OpenShift
     #
     # +user+ is of type +UnixUser+
     def initialize(user)
-      @user   = user
-      @path   = File.join(@user.homedir, 'git', "#{@user.app_name}.git")
-      @config = OpenShift::Config.new
+      @user = user
+      @path = File.join(@user.homedir, 'git', "#{@user.app_name}.git")
+    end
+
+    def exists?
+      File.directory?(@path)
     end
 
     ##
@@ -47,19 +50,14 @@ module OpenShift
     # If the directory +template.git+ exists it will be cloned as the application's repository.
     #
     def populate_from_cartridge(cartridge_name)
+      return nil if exists?
+
       FileUtils.mkpath(File.join(@user.homedir, 'git'))
 
       cartridge_template     = File.join(@user.homedir, cartridge_name, 'template')
       cartridge_template_git = File.join(@user.homedir, cartridge_name, 'template.git')
 
       have_template = (File.exist? cartridge_template or File.exist? cartridge_template_git)
-
-      # TODO: account for case where a cartridge doesn't supply a template
-      # and isn't supposed to, ie, a plugin cart.
-      #raise ArgumentError.new(
-      #          "No template for application git repository found"
-      #      ) unless have_template
-
       return nil unless have_template
 
       # TODO: Support tar balls etc...
@@ -73,7 +71,7 @@ module OpenShift
       @user_homedir     = @user.homedir
 
       # FIXME: See below
-      @broker_host      = @config.get('BROKER_HOST')
+      @broker_host      = OpenShift::Config.new.get('BROKER_HOST')
 
       case
         when File.exists?(cartridge_template)
@@ -82,7 +80,6 @@ module OpenShift
           pull_bare_repository(cartridge_template_git)
       end
       configure_repository
-      deploy_repository
     end
 
     ##
@@ -120,6 +117,13 @@ module OpenShift
     end
 
     def deploy_repository
+      # expose variables for ERB processing
+      @application_name = @user.app_name
+      @user_homedir     = @user.homedir
+
+      # FIXME: See below
+      @broker_host      = OpenShift::Config.new.get('BROKER_HOST')
+
       Utils.oo_spawn(ERB.new(GIT_DEPLOY).result(binding),
                      chdir:               @path,
                      uid:                 @user.uid,
