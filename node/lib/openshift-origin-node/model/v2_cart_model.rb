@@ -240,7 +240,7 @@ module OpenShift
       entries.each do |entry|
         begin
           Utils.oo_spawn(
-              "chown root:root #{entry};
+              "chown root:#{@user.gid} #{entry};
                chcon system_u:object_r:openshift_var_lib_t:#{mcs_label} #{entry}",
               expected_exitstatus: 0)
         rescue Utils::ShellExecutionException => e
