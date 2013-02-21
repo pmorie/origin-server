@@ -194,9 +194,9 @@ module OpenShift
           when line.end_with?('/*')
             memo << Dir.glob(File.join(@user.homedir, line)).select { |f| File.file?(f) }
           when FILENAME_BLACKLIST.include?(line)
-            @logger.info("#{cartridge_name} attempted lock/unlock on black listed entry #{line}")
+            logger.info("#{cartridge_name} attempted lock/unlock on black listed entry #{line}")
           when !(line.start_with?('.') || line.start_with?(cartridge_name) || line.start_with?('app-root'))
-            @logger.info("#{cartridge_name} attempted lock/unlock on out-of-bounds entry #{line}")
+            logger.info("#{cartridge_name} attempted lock/unlock on out-of-bounds entry #{line}")
           else
             memo << File.join(@user.homedir, line)
         end
@@ -381,7 +381,7 @@ module OpenShift
                          uid:             @user.uid,
                          expected_status: 0)
         rescue Utils::ShellExecutionException => e
-          @logger.info("Failed to render ERB #{file}: #{e.stderr}")
+          logger.info("Failed to render ERB #{file}: #{e.stderr}")
         else
           File.delete(file)
         end
