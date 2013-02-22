@@ -5,7 +5,18 @@
 
 source ~/.env/*
 
-source /usr/libexec/openshift/cartridges/v2/mock/mock.conf
+case "$1" in
+  -v|--version)
+    version="$2"
+esac
+
+cartridge_instance_dir=mock
+
+if [[ -n "$version" ]]; then
+  cartridge_instance_dir="$cartridge_instance_dir-$version"
+fi
+
+source $cartridge_instance_dir/mock.conf
 
 rm -rf $MOCK_STATE/
 mkdir $MOCK_STATE
@@ -17,15 +28,10 @@ function error_exit {
   exit $2
 }
 
-case "$1" in
-  -v|--version)
-    version="$2"
-esac
-
 if [[ -n "$version" ]]; then
   echo "Creating version marker for $version"
   echo "$version" > $MOCK_STATE/setup_version
-  echo "export OPENSHIFT_MOCK_VERSION=\'$version\'" > $OPENSHIFT_HOMEDIR/mock-$version/env/OPENSHIFT_MOCK_VERSION
+  echo "export OPENSHIFT_MOCK_VERSION=\'$version\'" > $cartridge_instance_dir/env/OPENSHIFT_MOCK_VERSION
 else
   echo "Skipping version creation marker."
 fi
