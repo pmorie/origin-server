@@ -26,39 +26,36 @@ module OpenShift
       carts = []
 
       config = OpenShift::Config.new
-
-      cartridge_path = config.get("CARTRIDGE_BASE_PATH")
-
-      #if OpenShift::Utils::Sdk.v2_node?(config)
-        # TODO: Resolve correct location of v2 cartridges.  For more context,
-        # see the comments in v2_cart_model.rb for get_system_cartridge_path
-        cartridge_path = File.join(cartridge_path, 'v2')
-        Dir.foreach(cartridge_path) do |cart_dir|
-          next if [".", ".."].include? cart_dir
-          path = File.join(cartridge_path, cart_dir, "metadata", "manifest.yml")
-          begin
-            print "Loading #{cart_dir}..." if oo_debug
-            carts.push OpenShift::Cartridge.new.from_descriptor(YAML.load(File.open(path)))
-            print "OK\n" if oo_debug
-          rescue Exception => e
-            print "ERROR\n" if oo_debug
-            print "#{e.message}\n#{e.backtrace.inspect}\n" unless porcelain
-          end
+      
+      cartridge_path = OpenShift::Config.new.get("CARTRIDGE_BASE_PATH")
+      Dir.foreach(cartridge_path) do |cart_dir|
+        next if [".", "..", "embedded", "abstract", "abstract-httpd", "abstract-jboss"].include? cart_dir
+        path = File.join(cartridge_path, cart_dir, "info", "manifest.yml")
+        begin
+          print "Loading #{cart_dir}..." if oo_debug
+          carts.push OpenShift::Cartridge.new.from_descriptor(YAML.load(File.open(path)))
+          print "OK\n" if oo_debug
+        rescue Exception => e
+          print "ERROR\n" if oo_debug
+          print "#{e.message}\n#{e.backtrace.inspect}\n" unless porcelain
         end
-      #else
-        # Dir.foreach(cartridge_path) do |cart_dir|
-        #   next if [".", "..", "embedded", "abstract", "abstract-httpd", "abstract-jboss"].include? cart_dir
-        #   path = File.join(cartridge_path, cart_dir, "info", "manifest.yml")
-        #   begin
-        #     print "Loading #{cart_dir}..." if oo_debug
-        #     carts.push OpenShift::Cartridge.new.from_descriptor(YAML.load(File.open(path)))
-        #     print "OK\n" if oo_debug
-        #   rescue Exception => e
-        #     print "ERROR\n" if oo_debug
-        #     print "#{e.message}\n#{e.backtrace.inspect}\n" unless porcelain
-        #   end
-        # end
-      #end
+      end
+
+      # TODO: Resolve correct location of v2 cartridges.  For more context,
+      # see the comments in v2_cart_model.rb for get_system_cartridge_path
+      cartridge_path = File.join(OpenShift::Config.new.get("CARTRIDGE_BASE_PATH"), 'v2')
+      Dir.foreach(cartridge_path) do |cart_dir|
+        next if [".", ".."].include? cart_dir
+        path = File.join(cartridge_path, cart_dir, "metadata", "manifest.yml")
+        begin
+          print "Loading #{cart_dir}..." if oo_debug
+          carts.push OpenShift::Cartridge.new.from_descriptor(YAML.load(File.open(path)))
+          print "OK\n" if oo_debug
+        rescue Exception => e
+          print "ERROR\n" if oo_debug
+          print "#{e.message}\n#{e.backtrace.inspect}\n" unless porcelain
+        end
+      end      
 
       print "\n\n\n" if oo_debug
 
