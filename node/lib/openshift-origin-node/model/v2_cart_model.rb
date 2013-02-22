@@ -42,7 +42,21 @@ module OpenShift
       @timeout = 30
     end
 
-    # Loads a cartridge from manifest for the given name.
+    # Load a cartridge from manifest for the given name.
+    #
+    # TODO: Caching?
+    def get_cartridge(cart_name)
+      begin
+        manifest_path = File.join(get_system_cartridge_path(cart_name), 'metadata', 'manifest.yml')
+        manifest      = YAML.load_file(manifest_path)
+        return OpenShift::Runtime::Cartridge.new(manifest)
+      rescue => e
+        logger.error(e.backtrace)
+        raise "Failed to load cart manifest from #{manifest_path} for cart #{cart_name} in gear #{@user.uuid}: #{e.message}"
+      end
+    end
+
+    # Get the path on disk to for a cartridge from the cartridge name.
     #
     # In this WIP, V2 cartridges are installed to and loaded
     # from
@@ -59,15 +73,40 @@ module OpenShift
     #
     # /usr/libexec/openshift/cartridges
     #
-    # TODO: Caching?
-    def get_cartridge(cart_name)
-      begin
-        manifest_path = File.join(@config.get('CARTRIDGE_BASE_PATH'), 'v2', cart_name, 'metadata', 'manifest.yml')
-        manifest      = YAML.load_file(manifest_path)
-        return OpenShift::Runtime::Cartridge.new(manifest)
-      rescue => e
-        logger.error(e.backtrace)
-        raise "Failed to load cart manifest from #{manifest_path} for cart #{cart_name} in gear #{@user.uuid}: #{e.message}"
+    # Currently, the version information for a cart is parsed from the
+    # name sent by the broker, which is of the form:
+    #
+    # cart_name-version, viz: ruby-1.9
+    #
+    # In this WIP, we will parse the cartridge name from this format
+    # and use it to construct the path on disk.  For example:
+    #
+    # ruby-1.9 -> /usr/libexec/openshift/cartridges/v2/ruby
+    #
+    # In the future, it is expected that the version will be a notion which
+    # is more fundamental to the platform and will be reflected in the 
+    # Cartridge class itself.
+    def get_system_cartridge_path(cart_name)
+      index = cart_name.rindex(/-[\d\.]+$/)
+      system_cart_name = cart_name
+      
+      if index
+        system_cart_name = cart_name.slice(0...index)
+      end
+
+      File.join(@config.get('CARTRIDGE_BASE_PATH'), 'v2', system_cart_name)
+    end
+
+    # Get the argument to pass as the version to the setup script 
+    # for the given cartridge name.  See the comment for get_system_cartridge_path
+    # for WIP version semantics.
+    def get_cartridge_version_argument(cartridge_name)
+      index = cartridge_name.rindex(/-[\d\.]+$/)
+
+      if index
+        cartridge_name.slice(index+1...cartridge_name.size)
+      else
+        nil
       end
     end
 
@@ -265,8 +304,8 @@ module OpenShift
     def create_cartridge_directory(cartridge_name)
       logger.info("Creating cartridge directory for #{cartridge_name}")
       # TODO: resolve correct location of v2 carts
-      source = File.join(@config.get('CARTRIDGE_BASE_PATH'), 'v2', cartridge_name)
-      raise "Cartridge #{cartridge_name} is not installed on system." unless File.exist? source
+      source = get_system_cartridge_path(cartridge_name)
+      raise "Cartridge #{cartridge_name} is not installed on system. #{source}" unless File.exist? source
 
       entries = Dir.glob(source + '/*')
       entries.delete_if { |e| e.end_with?('/opt') }
@@ -324,7 +363,7 @@ module OpenShift
     #  Raises exception if script fails
     #
     #   stdout = cartridge_setup('php-5.3')
-    def cartridge_setup(cartridge_name, version=nil)
+    def cartridge_setup(cartridge_name)
       logger.info "Running setup for #{cartridge_name}"
       # FIXME: Where?
       # setup IP Addresses
@@ -339,8 +378,11 @@ module OpenShift
       render_erbs(cartridge_env, cartridge_env_home)
       cartridge_env = gear_env.merge(Utils::Environ.load(cartridge_env_home))
 
+      version = get_cartridge_version_argument(cartridge_name)
+
       setup = File.join(cartridge_home, 'bin', 'setup')
-      setup << "--version=#{version}" if version
+      # TODO: establish convention for invoking setup with a version.
+      setup << " --version #{version}" if version
 
       out, err, rc = Utils.oo_spawn(setup,
                                     env:             cartridge_env,

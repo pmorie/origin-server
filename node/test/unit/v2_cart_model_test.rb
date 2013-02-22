@@ -100,6 +100,43 @@ class V2CartModelTest < Test::Unit::TestCase
     assert_equal 5, cart.endpoints.length
   end
 
+  def test_get_system_cartridge_path
+    scenarios = { 
+      'mock' => '/path/v2/mock',
+      'mock-0.0' => '/path/v2/mock',
+      'mock-plugin' => '/path/v2/mock-plugin',
+      'mock-plugin-0.0' => '/path/v2/mock-plugin',
+      'mock-' => '/path/v2/mock-',
+      'mock--' => '/path/v2/mock--',
+      'mock--0.0' => '/path/v2/mock-',
+      'mock-0.0-' => '/path/v2/mock-0.0-'
+    }
+
+    @config.stubs(:get).with("CARTRIDGE_BASE_PATH").returns('/path')
+
+    scenarios.each do |cart_name, expected_path|
+      res = @model.get_system_cartridge_path(cart_name)
+      assert_equal expected_path, res
+    end
+  end
+
+  def test_get_cartridge_version_argument
+    scenarios = {
+      'mock' => nil,
+      'mock-0.0' => '0.0',
+      'mock-plugin' => nil,
+      'mock-plugin-0.0' => '0.0',
+      'mock-plugin-' => nil,
+      'mock-plugin--0.0' => '0.0',
+      'mock-plugin-0.0-' => nil
+    }
+
+    scenarios.each do |cart_name, expected_version|
+      res = @model.get_cartridge_version_argument(cart_name)
+      assert_equal expected_version, res
+    end
+  end
+
   def test_private_endpoint_create
     ip1 = "127.0.250.1"
     ip2 = "127.0.250.2"
