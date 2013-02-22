@@ -24,8 +24,8 @@ require 'openshift-origin-node/utils/shell_exec'
 require 'openshift-origin-node/utils/application_state'
 require 'openshift-origin-node/utils/environ'
 require 'openshift-origin-node/utils/sdk'
+require 'openshift-origin-node/utils/node_logger'
 require 'openshift-origin-common'
-require 'logger'
 require 'yaml'
 require 'active_model'
 
@@ -34,13 +34,13 @@ module OpenShift
   class ApplicationContainer
     include OpenShift::Utils::ShellExec
     include ActiveModel::Observing
+    include NodeLogger
 
     attr_reader :uuid, :application_uuid, :user, :state, :container_name, :cartridge_model
 
     def initialize(application_uuid, container_uuid, user_uid = nil,
         app_name = nil, container_name = nil, namespace = nil, quota_blocks = nil, quota_files = nil, logger = nil)
 
-      @logger           = logger ||= Logger.new(STDOUT)
       @config           = OpenShift::Config.new
       @uuid             = container_uuid
       @application_uuid = application_uuid
@@ -151,7 +151,7 @@ module OpenShift
       env = Utils::Environ::for_gear(@user.homedir)
       cart = @cartridge_model.get_cartridge(cart_name)
 
-      proxy = OpenShift::FrontendProxyServer.new(@logger)
+      proxy = OpenShift::FrontendProxyServer.new
 
       # TODO: better error handling
       cart.public_endpoints.each do |endpoint|
@@ -168,7 +168,7 @@ module OpenShift
 
         @user.add_env_var(endpoint.public_port_name, public_port)
 
-        @logger.info("Created public endpoint for cart #{cart.name} in gear #{@uuid}: "\
+        logger.info("Created public endpoint for cart #{cart.name} in gear #{@uuid}: "\
           "[#{endpoint.public_port_name}=#{public_port}]")
       end
     end
@@ -183,7 +183,7 @@ module OpenShift
       env = Utils::Environ::for_gear(@user.homedir)
       cart = @cartridge_model.get_cartridge(cart_name)
 
-      proxy = OpenShift::FrontendProxyServer.new(@logger)
+      proxy = OpenShift::FrontendProxyServer.new
 
       public_ports = []
       public_port_vars = []
@@ -202,11 +202,11 @@ module OpenShift
       begin
         # Remove the proxy entries
         rc = proxy.delete_all(public_ports, true)
-        @logger.info("Deleted all public endpoints for cart #{cart.name} in gear #{@uuid}\n"\
+        logger.info("Deleted all public endpoints for cart #{cart.name} in gear #{@uuid}\n"\
           "Endpoints: #{public_port_vars}\n"\
           "Public ports: #{public_ports}")
       rescue => e
-        @logger.warn(%Q{Couldn't delete all public endpoints for cart #{cart.name} in gear #{@uuid}: #{e.message}
+        logger.warn(%Q{Couldn't delete all public endpoints for cart #{cart.name} in gear #{@uuid}: #{e.message}
           Endpoints: #{public_port_vars}
           Public ports: #{public_ports}
           #{e.backtrace}
@@ -231,7 +231,7 @@ module OpenShift
     # Raises an Exception if an internal error occurs, and ignores
     # failed cartridge tidy hook executions.
     def tidy
-      @logger.debug("Starting tidy on gear #{@uuid}")
+      logger.debug("Starting tidy on gear #{@uuid}")
 
       env = Utils::Environ::for_gear(@user.homedir)
       gear_dir = env['OPENSHIFT_HOMEDIR']
@@ -250,12 +250,12 @@ module OpenShift
         # Delegate to cartridge model to perform cart-level tidy operations for all installed carts.
         @cartridge_model.tidy
       rescue Exception => e
-        @logger.warn("An unknown exception occured during tidy for gear #{@uuid}: #{e.message}\n#{e.backtrace}")
+        logger.warn("An unknown exception occured during tidy for gear #{@uuid}: #{e.message}\n#{e.backtrace}")
       ensure
         start_gear(gear_dir)
       end
 
-      @logger.debug("Completed tidy for gear #{@uuid}")
+      logger.debug("Completed tidy for gear #{@uuid}")
     end
 
     def stop_gear(gear_dir)
@@ -263,9 +263,9 @@ module OpenShift
       begin
         # Stop the gear. If this fails, consider the tidy a failure.
         out, err, rc = OpenShift::Utils::ShellExec.shellCmd("/usr/sbin/oo-admin-ctl-gears stopgear #{@user.uuid}", gear_dir, false, 0)
-        @logger.debug("Stopped gear #{@uuid}. Output:\n#{out}")
+        logger.debug("Stopped gear #{@uuid}. Output:\n#{out}")
       rescue OpenShift::Utils::ShellExecutionException => e
-        @logger.error(%Q{
+        logger.error(%Q{
           Couldn't stop gear #{@uuid} for tidy: #{e.message}
           --- stdout ---\n#{e.stdout}
           --- stderr ---\n#{e.stderr}
@@ -280,9 +280,9 @@ module OpenShift
         # Start the gear, and if that fails raise an exception, as the app is now
         # in a bad state.
         out, err, rc = OpenShift::Utils::ShellExec.shellCmd("/usr/sbin/oo-admin-ctl-gears startgear #{@user.uuid}", gear_dir)
-        @logger.debug("Started gear #{@uuid}. Output:\n#{out}")
+        logger.debug("Started gear #{@uuid}. Output:\n#{out}")
       rescue OpenShift::Utils::ShellExecutionException => e
-        @logger.error(%Q{
+        logger.error(%Q{
           Failed to restart gear #{@uuid} following tidy: #{e.message}
           --- stdout ---\n#{e.stdout}
           --- stderr ---\n#{e.stderr}
@@ -295,19 +295,19 @@ module OpenShift
       # Git pruning
       tidy_action do
         OpenShift::Utils::ShellExec.run_as(@user.uid, @user.gid, "git prune", gear_repo_dir, false, 0)
-        @logger.debug("Pruned git directory at #{gear_repo_dir}")
+        logger.debug("Pruned git directory at #{gear_repo_dir}")
       end
 
       # Git GC
       tidy_action do
         OpenShift::Utils::ShellExec.run_as(@user.uid, @user.gid, "git gc --aggressive", gear_repo_dir, false, 0)
-        @logger.debug("Executed git gc for repo #{gear_repo_dir}")
+        logger.debug("Executed git gc for repo #{gear_repo_dir}")
       end
 
       # Temp dir cleanup
       tidy_action do
         FileUtils.rm_rf(Dir.glob(File.join(gear_tmp_dir, "*")))
-        @logger.debug("Cleaned gear temp dir at #{gear_tmp_dir}")
+        logger.debug("Cleaned gear temp dir at #{gear_tmp_dir}")
       end
     end
 
@@ -317,7 +317,7 @@ module OpenShift
       begin
         yield
       rescue OpenShift::Utils::ShellExecutionException => e
-        @logger.warn(%Q{
+        logger.warn(%Q{
           Tidy operation failed on gear #{@uuid}: #{e.message}
           --- stdout ---\n#{e.stdout}
           --- stderr ---\n#{e.stderr}

@@ -1,5 +1,4 @@
 require 'rubygems'
-require 'logger'
 require 'openshift-origin-node/model/unix_user'
 require 'openshift-origin-node/model/application_repository'
 require 'openshift-origin-node/utils/shell_exec'
