@@ -711,20 +711,27 @@ Dir(after)    #{@uuid}/#{@uid} => #{list_home_dir(@homedir)}
 
     # private: Set the SELinux context on a file or directory
     #
+    # If target is a directory, operation will be recursive.
+    #
     # @param [Integer] The user ID
-    def set_selinux_context(path)
+    def set_selinux_context(target)
       mcs_label=get_mcs_label(@uid)
 
-      cmd = "restorecon -R #{path}"
+      recurse = '-R' if File.directory?(target)
+
+      cmd = "restorecon #{recurse} #{target}"
       out, err, rc = shellCmd(cmd)
       logger.error(
-                "ERROR: unable to restorecon user homedir(#{rc}): #{cmd} stdout: #{out} stderr: #{err}"
+                "ERROR: unable to restorecon #{target} (#{rc}): #{cmd} stdout: #{out} stderr: #{err}"
                 ) unless 0 == rc
-      cmd = "chcon -R -l #{mcs_label} #{path}/*"
+
+      chcon_target = File.directory?(target) ? File.join(target, "*") : target
+
+      cmd = "chcon #{recurse} -l #{mcs_label} #{chcon_target}"
 
       out, err, rc = shellCmd(cmd)
       logger.error(
-                "ERROR: unable to chcon user homedir(#{rc}): #{cmd} stdout: #{out} stderr: #{err}"
+                "ERROR: unable to chcon #{chcon_target} (#{rc}): #{cmd} stdout: #{out} stderr: #{err}"
                 ) unless 0 == rc
     end
 
