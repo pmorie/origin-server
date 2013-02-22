@@ -66,15 +66,7 @@ module OpenShift
       if user.homedir && File.exist?(user.homedir)
         build_model = :v2 if OpenShift::Utils::Sdk.new_sdk_app?(user.homedir)
       else
-        v1_marker_exist = File.exist?(File.join(config.get('GEAR_BASE_DIR'), '.settings', 'v1_cartridge_format'))
-        v2_marker_exist = File.exist?(File.join(config.get('GEAR_BASE_DIR'), '.settings', 'v2_cartridge_format'))
-
-        if  v1_marker_exist and v2_marker_exist
-          raise 'Node cannot create both v1 and v2 formatted cartridges. Delete one of the cartridge format marker files'
-        end
-
-        # TODO: When v2 is the default cartridge format change this test...
-        build_model = :v2 if v2_marker_exist
+        build_model = :v2 if OpenShift::Utils::Sdk.v2_node?(config)
       end
 
       build_model
