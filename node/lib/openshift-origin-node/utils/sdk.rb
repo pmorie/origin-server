@@ -1,3 +1,5 @@
+require 'node_logger'
+
 module OpenShift
   module Utils
     class Sdk
@@ -8,6 +10,7 @@ module OpenShift
       end
 
       def self.mark_new_sdk_app(gear_home) 
+        NodeLogger.logger.info("Marking v2 cart format in #{gear_home}/.env/#{GEAR_MARKER}")
         FileUtils.touch(File.join(gear_home, '.env', GEAR_MARKER))
       end
 

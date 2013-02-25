@@ -42,6 +42,10 @@ module OpenShift
       @timeout = 30
     end
 
+    def mark_gear
+      OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
+    end
+
     # Load a cartridge from manifest for the given name.
     #
     # TODO: Caching?
@@ -157,7 +161,6 @@ module OpenShift
     def configure(cartridge_name, template_git_url = nil)
       output = ''
 
-      OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
       OpenShift::Utils::Cgroups::with_cgroups_disabled(@user.uuid) do
         create_cartridge_directory(cartridge_name)
         create_private_endpoints(cartridge_name)

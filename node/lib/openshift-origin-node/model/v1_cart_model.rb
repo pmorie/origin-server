@@ -14,6 +14,10 @@ module OpenShift
       @user = user
     end
 
+    def mark_gear
+      
+    end
+
     def get_cartridge(cart_name)
       begin
         manifest_path = File.join(@config.get('CARTRIDGE_BASE_PATH'), cart_name, 'info', 'manifest.yml')

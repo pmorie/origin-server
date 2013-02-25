@@ -57,6 +57,8 @@ module OpenShift
       else
         @cartridge_model = V2CartridgeModel.new(@config, @user)
       end
+
+      # TODO: mark v2 apps when they are created
     end
 
     def self.get_build_model(user, config)
@@ -64,10 +66,14 @@ module OpenShift
       build_model = :v1
 
       if user.homedir && File.exist?(user.homedir)
+        NodeLogger.logger.info "checking user directory for marker"
         build_model = :v2 if OpenShift::Utils::Sdk.new_sdk_app?(user.homedir)
       else
+        NodeLogger.logger.info "checking node configuration...."
         build_model = :v2 if OpenShift::Utils::Sdk.v2_node?(config)
       end
+
+      NodeLogger.logger.info("build model: #{build_model}")
 
       build_model
     end    
@@ -87,6 +93,7 @@ module OpenShift
     # context: root -> gear user -> root
     # @param cart_name   cartridge name
     def configure(cart_name, template_git_url=nil)
+      logger.info("configure #{cart_name}")
       @cartridge_model.configure(cart_name, template_git_url)
     end
 
@@ -103,6 +110,9 @@ module OpenShift
     # - model/unix_user.rb
     # context: root
     def create
+      # TODO: cart_model.mark
+      logger.info("app create: marking cart model")
+      @cartridge_model.mark
       notify_observers(:before_container_create)
       @user.create
       notify_observers(:after_container_create)
