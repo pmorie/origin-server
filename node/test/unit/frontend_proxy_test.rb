@@ -188,10 +188,10 @@ class FrontendProxyTest < Test::Unit::TestCase
   def test_system_proxy_delete
     proxy = OpenShift::FrontendProxyServer.new
 
-    proxy.expects(:shellCmd).with(equals("openshift-port-proxy-cfg setproxy 1 delete")).once
+    OpenShift::Utils.expects(:oo_spawn).with(equals("openshift-port-proxy-cfg setproxy 1 delete"))
     proxy.system_proxy_delete(1)
 
-    proxy.expects(:shellCmd).with(equals("openshift-port-proxy-cfg setproxy 1 delete 2 delete 3 delete")).once
+    OpenShift::Utils.expects(:oo_spawn).with(equals("openshift-port-proxy-cfg setproxy 1 delete 2 delete 3 delete"))
     proxy.system_proxy_delete(1, 2, 3)
   end
 
@@ -200,12 +200,11 @@ class FrontendProxyTest < Test::Unit::TestCase
   def test_system_proxy_add
     proxy = OpenShift::FrontendProxyServer.new    
 
-    proxy.expects(:shellCmd).with(equals('openshift-port-proxy-cfg setproxy 3000 "127.0.0.1:1000"')).once
+    OpenShift::Utils.expects(:oo_spawn).with(equals('openshift-port-proxy-cfg setproxy 3000 "127.0.0.1:1000"'))
     proxy.system_proxy_set({:proxy_port => 3000, :addr => '127.0.0.1:1000'})
 
-    proxy.expects(:shellCmd)
+    OpenShift::Utils.expects(:oo_spawn)
       .with(equals('openshift-port-proxy-cfg setproxy 3000 "127.0.0.1:1000" 3001 "127.0.0.1:1001" 3002 "127.0.0.1:1002"'))
-      .once
 
     proxy.system_proxy_set(
       {:proxy_port => 3000, :addr => '127.0.0.1:1000'},

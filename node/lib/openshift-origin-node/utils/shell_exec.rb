@@ -16,9 +16,7 @@
 
 require 'rubygems'
 require 'timeout'
-require 'open4'
-
-require_relative '../utils/node_logger'
+require 'openshift-origin-node/utils/node_logger'
 
 module OpenShift
   module Utils
@@ -117,12 +115,26 @@ module OpenShift
 
             return [out, err, status.exitstatus]
           rescue TimeoutExceeded => e
-            ShellExec.kill_process_tree(pid)
+            self.kill_process_tree(pid)
             raise OpenShift::Utils::ShellExecutionException.new(
                       "Shell command '#{command}'' exceeded timeout of #{e.seconds}", -1, out, err)
           end
         end
       end
+    end
+
+    # kill_process_tree 2199 -> fixnum
+    #
+    # Given a pid find it and KILL it and all it's children
+    def self.kill_process_tree(pid)
+      ps_results = `ps -e -opid,ppid --no-headers`.split("\n")
+
+      ps_tree = Hash.new { |h, k| h[k] = [k] }
+      ps_results.each { |pair|
+        p, pp = pair.split(' ')
+        ps_tree[pp.to_i] << p.to_i
+      }
+      Process.kill("KILL", *(ps_tree[pid].flatten))
     end
 
     private
@@ -171,113 +183,6 @@ module OpenShift
         raise TimeoutExceeded, options[:timeout]
       rescue Errno::ECHILD
         return [out, err, status]
-      end
-    end
-  end
-end
-
-module OpenShift::Utils
-  module ShellExec
-    def shellCmd(cmd, pwd = ".", ignore_err = true, expected_rc = 0, timeout = 3600)
-      OpenShift::Utils::ShellExec.shellCmd(cmd, pwd, ignore_err, expected_rc, timeout)
-    end
-
-    # Public: Execute shell command.
-    #
-    # iv - A String value for the IV file.
-    # cmd - A String value of the command to run.
-    # pwd - A String value of target working directory.
-    # ignore_err - A Boolean value to determine if errors should be ignored.
-    # expected_rc - A Integer value for the expected return code of cmd.
-    #
-    # Examples
-    #   OpenShift::Utils::ShellExec.shellCmd('ls /etc/passwd')
-    #   # => ["/etc/passwd\n","", 0]
-    #
-    # Returns An Array with [stdout, stderr, return_code]
-    def self.shellCmd(cmd, pwd = ".", ignore_err = true, expected_rc = 0, timeout = 3600)
-      out = err = rc = nil
-      begin
-        # Using Open4 spawn with cwd isn't thread safe
-        m_cmd                      = "cd #{pwd} && ( #{cmd} )"
-        pid, stdin, stdout, stderr = Open4.popen4ext(true, m_cmd)
-        begin
-          stdin.close
-          out   = err = ""
-          fds   = [stdout, stderr]
-          buffs = {stdout.fileno => out, stderr.fileno => err}
-          Timeout::timeout(timeout) do
-            while not fds.empty?
-              rs, ws, es = IO.select(fds, nil, nil)
-              rs.each do |f|
-                begin
-                  buffs[f.fileno] << f.read_nonblock(4096)
-                rescue IO::WaitReadable, IO::WaitWritable # Wait in next select
-                rescue EOFError
-                  fds.delete_if { |item| item.fileno == f.fileno }
-                end
-              end
-            end
-          end
-        rescue Timeout::Error
-          kill_process_tree(pid)
-          raise ShellExecutionException.new(
-                    "Shell command '#{cmd}'' timed out (timeout is #{timeout})", -1, out, err)
-        ensure
-          stdout.close
-          stderr.close
-          rc = Process::waitpid2(pid)[1].exitstatus
-        end
-      rescue Exception => e
-        raise OpenShift::Utils::ShellExecutionException.new(e.message, rc, out, err
-              ) unless ignore_err
-      end
-
-      if !ignore_err and rc != expected_rc
-        raise OpenShift::Utils::ShellExecutionException.new(
-                  "Shell command '#{cmd}' returned an error. rc=#{rc}", rc, out, err)
-      end
-      return [out, err, rc]
-    end
-
-    # kill_process_tree 2199 -> fixnum
-    #
-    # Given a pid find it and KILL it and all it's children
-    def self.kill_process_tree(pid)
-      ps_results = `ps -e -opid,ppid --no-headers`.split("\n")
-
-      ps_tree = Hash.new { |h, k| h[k] = [k] }
-      ps_results.each { |pair|
-        p, pp = pair.split(' ')
-        ps_tree[pp.to_i] << p.to_i
-      }
-      Process.kill("KILL", *(ps_tree[pid].flatten))
-    end
-
-    def self.run_as(uid, gid, cmd, pwd = ".", ignore_err = true, expected_rc = 0, timeout = 3600)
-      mcs_level, err, rc = OpenShift::Utils::ShellExec.shellCmd("/usr/bin/oo-get-mcs-level #{uid}", pwd, true, 0, timeout)
-      raise OpenShift::Utils::ShellExecutionException.new(
-                "Shell command '#{cmd}' returned an error. rc=#{rc}. output=#{err}", rc, mcs_level, err) if 0 != rc
-
-      command = "/usr/bin/runcon -r system_r -t openshift_t -l #{mcs_level.chomp} #{cmd}"
-      pid     = fork {
-        Process::GID.change_privilege(gid.to_i)
-        Process::UID.change_privilege(uid.to_i)
-        out, err, rc = OpenShift::Utils::ShellExec.shellCmd(command, pwd, true, 0, timeout)
-        exit $?.exitstatus
-      }
-
-      if pid
-        Process.wait(pid)
-        rc = $?.exitstatus
-        if !ignore_err and rc != expected_rc
-          raise OpenShift::Utils::ShellExecutionException.new(
-                    "Shell command '#{command}' returned an error. rc=#{rc}", rc)
-        end
-        return rc
-      else
-        raise OpenShift::Utils::ShellExecutionException.new(
-                  "Shell command '#{command}' fork failed in run_as().")
       end
     end
   end

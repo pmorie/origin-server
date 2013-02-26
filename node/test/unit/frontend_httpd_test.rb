@@ -217,7 +217,7 @@ class FrontendHttpServerModelTest < Test::Unit::TestCase
     FileUtils.stubs(:rm_rf).once
 
     frontend = OpenShift::FrontendHttpServer.new(@container_uuid, @container_name, @namespace)
-    frontend.stubs(:shellCmd).returns(["", "", 0]).once
+    OpenShift::Utils.expects(:oo_spawn).returns(["", "", 0])
     frontend.destroy
 
     check_dbs_empty
@@ -384,7 +384,7 @@ class FrontendHttpServerModelTest < Test::Unit::TestCase
     frontend.connect("", "#{@ip}:#{@port}", { "websocket" => 1})
     frontend.add_alias("#{@test_alias}")
 
-    frontend.stubs(:shellCmd).returns(["", "", 0]).twice
+    OpenShift::Utils.expects(:oo_spawn).returns(["", "", 0]).twice
 
     frontend.add_ssl_cert(@test_ssl_cert, @test_ssl_key, @test_alias, @test_ssl_key_passphrase)
 

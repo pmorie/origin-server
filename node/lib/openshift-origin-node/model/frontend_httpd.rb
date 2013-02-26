@@ -104,7 +104,6 @@ module OpenShift
   # Note: This is the Apache VirtualHost implementation; other implementations may vary.
   #
   class FrontendHttpServer < Model
-    include OpenShift::Utils::ShellExec
     include NodeLogger
 
     attr_reader :container_uuid, :container_name
@@ -801,7 +800,9 @@ module OpenShift
     def reload_httpd(async=false)
       async_opt="-b" if async
       begin
-        shellCmd("/usr/sbin/oo-httpd-singular #{async_opt} graceful", "/", false)
+        Utils.oo_spawn("/usr/sbin/oo-httpd-singular #{async_opt} graceful",
+                       chdir: "/",
+                       expected_exitstatus: 0)
       rescue OpenShift::Utils::ShellExecutionException => e
         logger.error("ERROR: failure from oo-httpd-singular(#{e.rc}): #{@uuid} stdout: #{e.stdout} stderr:#{e.stderr}")
         raise FrontendHttpServerExecException.new(e.message, @container_uuid, @container_name, @namespace, e.rc, e.stdout, e.stderr)
@@ -825,7 +826,6 @@ module OpenShift
   # Apache if data was modified.
   #
   class ApacheDB < Hash
-    include OpenShift::Utils::ShellExec
     include NodeLogger
 
     # The locks and lockfiles are based on the file name
@@ -942,7 +942,7 @@ module OpenShift
         end
 
         cmd = %{#{httxt2dbm} -f DB -i #{@filename}#{self.SUFFIX} -o #{tmpdb}}
-        out,err,rc = shellCmd(cmd)
+        out,err,rc = Utils.oo_spawn(cmd)
         if rc == 0
           logger.debug("httxt2dbm: #{@filename}: #{rc}: stdout: #{out} stderr:#{err}")
           begin
@@ -1076,7 +1076,9 @@ module OpenShift
 
     def callout
       begin
-        shellCmd("service openshift-node-web-proxy reload", "/", false)
+        Utils.oo_spawn("service openshift-node-web-proxy reload",
+                       chdir: "/",
+                       expected_exitstatus: 0)
       rescue OpenShift::Utils::ShellExecutionException => e
         logger.error("ERROR: failure from openshift-node-web-proxy(#{e.rc}) stdout: #{e.stdout} stderr:#{e.stderr}")
       end

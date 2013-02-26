@@ -34,7 +34,6 @@ module OpenShift
   #
   # Represents a user account on the system.
   class UnixUser
-    include OpenShift::Utils::ShellExec
     include ActiveModel::Observing
     include NodeLogger
 
@@ -122,7 +121,7 @@ module OpenShift
                   -m \
                   -k #{skel_dir} \
                   #{@uuid}}
-          out,err,rc = shellCmd(cmd)
+          out,err,rc = Utils.oo_spawn(cmd)
           raise UserCreationException.new(
                   "ERROR: unable to create user account(#{rc}): #{cmd.squeeze(" ")} stdout: #{out} stderr: #{err}"
                   ) unless rc == 0
@@ -203,7 +202,7 @@ module OpenShift
 
         dirs = list_home_dir(@homedir)
         cmd = "userdel -f \"#{@uuid}\""
-        out,err,rc = shellCmd(cmd)
+        out,err,rc = Utils.oo_spawn(cmd)
         raise UserDeletionException.new(
               "ERROR: unable to destroy user account(#{rc}): #{cmd} stdout: #{out} stderr: #{err}"
               ) unless rc == 0
@@ -601,8 +600,8 @@ Dir(after)    #{@uuid}/#{@uid} => #{list_home_dir(@homedir)}
       #    directories by pam_namespace.
       out = err = rc = nil
       10.times do |i|
-        OpenShift::Utils::ShellExec.shellCmd(%{/usr/bin/pkill -9 -u #{id}})
-        out,err,rc = OpenShift::Utils::ShellExec.shellCmd(%{/usr/bin/pgrep -u #{id}})
+        Utils.oo_spawn(%{/usr/bin/pkill -9 -u #{id}})
+        out,err,rc = Utils.oo_spawn(%{/usr/bin/pgrep -u #{id}})
         break unless 0 == rc
 
         NodeLogger.logger.error "ERROR: attempt #{i}/10 there are running \"killed\" processes for #{id}(#{rc}): stdout: #{out} stderr: #{err}"
@@ -611,7 +610,7 @@ Dir(after)    #{@uuid}/#{@uid} => #{list_home_dir(@homedir)}
 
       # looks backwards but 0 implies processes still existed
       if 0 == rc
-        out,err,rc = OpenShift::Utils::ShellExec.shellCmd("ps -u #{@uid} -o state,pid,ppid,cmd")
+        out,err,rc = Utils.oo_spawn("ps -u #{@uid} -o state,pid,ppid,cmd")
         NodeLogger.logger.error "ERROR: failed to kill all processes for #{id}(#{rc}): stdout: #{out} stderr: #{err}"
       end
     end
@@ -636,13 +635,13 @@ Dir(after)    #{@uuid}/#{@uid} => #{list_home_dir(@homedir)}
       end
 
       ['-m', '-q', '-s' ].each do |ipctype|
-        out,err,rc=shellCmd(%{/usr/bin/ipcs -c #{ipctype} 2> /dev/null})
+        out,err,rc=Utils.oo_spawn(%{/usr/bin/ipcs -c #{ipctype} 2> /dev/null})
         out.lines do |ipcl|
           next unless ipcl=~/^\d/
           ipcent = ipcl.split
           if ipcent[2] == id
             # The ID may already be gone
-            shellCmd(%{/usr/bin/ipcrm #{ipctype} #{ipcent[0]}})
+            Utils.oo_spawn(%{/usr/bin/ipcrm #{ipctype} #{ipcent[0]}})
           end
         end
       end
@@ -727,7 +726,7 @@ Dir(after)    #{@uuid}/#{@uid} => #{list_home_dir(@homedir)}
       recurse = '-R' if File.directory?(target)
 
       cmd = "restorecon #{recurse} #{target}"
-      out, err, rc = shellCmd(cmd)
+      out, err, rc = Utils.oo_spawn(cmd)
       logger.error(
                 "ERROR: unable to restorecon #{target} (#{rc}): #{cmd} stdout: #{out} stderr: #{err}"
                 ) unless 0 == rc
@@ -736,7 +735,7 @@ Dir(after)    #{@uuid}/#{@uid} => #{list_home_dir(@homedir)}
 
       cmd = "chcon #{recurse} -l #{mcs_label} #{chcon_target}"
 
-      out, err, rc = shellCmd(cmd)
+      out, err, rc = Utils.oo_spawn(cmd)
       logger.error(
                 "ERROR: unable to chcon #{chcon_target} (#{rc}): #{cmd} stdout: #{out} stderr: #{err}"
                 ) unless 0 == rc

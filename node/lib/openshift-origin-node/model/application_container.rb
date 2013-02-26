@@ -32,7 +32,6 @@ require 'active_model'
 module OpenShift
   # == Application Container
   class ApplicationContainer
-    include OpenShift::Utils::ShellExec
     include ActiveModel::Observing
     include NodeLogger
 
@@ -261,7 +260,10 @@ module OpenShift
       # TODO: remove shell command
       begin
         # Stop the gear. If this fails, consider the tidy a failure.
-        out, err, rc = OpenShift::Utils::ShellExec.shellCmd("/usr/sbin/oo-admin-ctl-gears stopgear #{@user.uuid}", gear_dir, false, 0)
+        out, err, rc = Utils.oo_spawn("/usr/sbin/oo-admin-ctl-gears stopgear #{@user.uuid}",
+                                      chdir: gear_dir,
+                                      expected_exitstatus: 0)
+
         logger.debug("Stopped gear #{@uuid}. Output:\n#{out}")
       rescue OpenShift::Utils::ShellExecutionException => e
         logger.error(%Q{
@@ -278,7 +280,10 @@ module OpenShift
       begin
         # Start the gear, and if that fails raise an exception, as the app is now
         # in a bad state.
-        out, err, rc = OpenShift::Utils::ShellExec.shellCmd("/usr/sbin/oo-admin-ctl-gears startgear #{@user.uuid}", gear_dir)
+        out, err, rc = Utils.oo_spawn("/usr/sbin/oo-admin-ctl-gears startgear #{@user.uuid}",
+                                      chdir: gear_dir,
+                                      expected_exitstatus: 0)
+
         logger.debug("Started gear #{@uuid}. Output:\n#{out}")
       rescue OpenShift::Utils::ShellExecutionException => e
         logger.error(%Q{
@@ -293,13 +298,21 @@ module OpenShift
     def gear_level_tidy(gear_repo_dir, gear_tmp_dir)
       # Git pruning
       tidy_action do
-        OpenShift::Utils::ShellExec.run_as(@user.uid, @user.gid, "git prune", gear_repo_dir, false, 0)
+        Utils.oo_spawn("git prune",
+                       uid: @user.uid,
+                       chdir: gear_repo_dir,
+                       expected_exitstatus: 0)
+
         logger.debug("Pruned git directory at #{gear_repo_dir}")
       end
 
       # Git GC
       tidy_action do
-        OpenShift::Utils::ShellExec.run_as(@user.uid, @user.gid, "git gc --aggressive", gear_repo_dir, false, 0)
+        Utils.oo_spawn("git gc --aggressive",
+                       uid: @user.uid,
+                       chdir: gear_repo_dir,
+                       expected_exitstatus: 0)
+
         logger.debug("Executed git gc for repo #{gear_repo_dir}")
       end
 
