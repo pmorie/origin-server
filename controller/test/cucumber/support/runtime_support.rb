@@ -93,9 +93,9 @@ module OpenShift
     end
 
     # Creates a new empty gear associated with this application.
-    def create_gear
+    def create_gear(cli)
       gear = OpenShift::TestGear.new(self)
-      gear.create
+      gear.create(cli)
       @gears << gear
       gear
     end
@@ -127,7 +127,7 @@ module OpenShift
 
       @gears.each do |gear|
         gear.carts.values.each do |cart|
-          Dir.glob("#{$home_root}/#{gear.uuid}/#{cart.name}/{run,pid}/*.pid") do |pid_file|
+          Dir.glob("#{$home_root}/#{gear.uuhttps://ci.dev.openshift.redhat.com/jenkins/job/merge_pull_requests/1905/consoleid}/#{cart.name}/{run,pid}/*.pid") do |pid_file|
             $logger.info("Reading pid file #{pid_file} for cart #{cart.name}")
             pid = IO.read(pid_file).chomp
             proc_name = File.basename(pid_file, ".pid")

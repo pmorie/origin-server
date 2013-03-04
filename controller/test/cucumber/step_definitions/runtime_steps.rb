@@ -94,6 +94,10 @@ Given /^a(n additional)? new ([^ ]+) type application$/ do | additional, cart_na
   end
 end
 
+Given /^a new cli-created ([^ ]+) type application$/ do |cart_name|
+
+end
+
 # Invokes destroy on the current application.
 When /^I destroy the application$/ do
   record_measure("Runtime Benchmark: Destroying cartridge #{@cart.name}") do
