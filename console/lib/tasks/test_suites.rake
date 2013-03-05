@@ -56,6 +56,15 @@ namespace :test do
       ])
     end
 
+    Rake::TestTask.new :app_request_queuing => ['test:prepare'] do |t|
+      t.libs << 'test'
+      covered.concat(t.test_files = FileList[
+        'test/functional/applications_controller_test.rb',
+        'test/functional/scaling_controller_test.rb',
+        'test/integration/rest_api/cartridge_test.rb'
+      ])
+    end
+
     Rake::TestTask.new :restapi_integration => ['test:prepare'] do |t|
       t.libs << 'test'
       covered.concat(t.test_files = FileList[

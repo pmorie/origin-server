@@ -28,7 +28,35 @@ class RestApiCartridgeTest < ActiveSupport::TestCase
 
     cart.scales_from = base
     cart.scales_to = base
-    assert cart.save, "Unable to set scales_from/to to #{base}: #{cart.errors.full_messages}"
+
+    # The app being used in this test can be being reused from other test cases. When this
+    # is the case, a race condition exists that can cause this test to fail with the 
+    # 'Application is currently busy' message being tested for in the code below.
+    #
+    # The following retry logic is a workaround for this race condition.
+    # 
+    # To attempt to recreate this scenario, you can use the check:app_request_queuing test suite
+    # defined in the console Rakefile.
+    #
+    # This workaround will become unnecessary when the broker is made to queue requests
+    # to an application and process them serially.
+    #
+    # Extra context: The error message is seen in the following files:
+    #  controller/app/controllers/applications_controller.rb
+    #  controller/app/controllers/app_events_controller.rb
+    #  controller/app/controllers/emb_cart_controller.rb
+    tries = 0
+    
+    begin
+      tries += 1
+      assert cart.save, "Unable to set scales_from/to to #{base}: #{cart.errors.full_messages}"
+    rescue Test::Unit::AssertionFailedError => e
+      if cart.full_messages.include? 'Application is currently busy performing another operation. Please try again in a minute.'
+        retry if tries <= 3
+      end
+
+      raise
+    end
 
     assert_equal base, cart.scales_from
     assert_equal base, cart.scales_to
