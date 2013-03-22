@@ -1,0 +1,13 @@
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require 'openshift-origin-node/utils/sdk'
+require 'etc'
+
+homedir = Etc.getpwuid.dir
+
+if OpenShift::Utils::Sdk.new_sdk_app?(homedir)
+  raise NotImplementedError.new('restore is not implemented for v2 apps')  
+else
+  puts `restore.sh`
+end

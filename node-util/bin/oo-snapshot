@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+cd ~
+
+if [[ -f '.env/CARTRIDGE_VERSION_2' ]]; then
+  snapshot.sh
+else
+  gear snapshot
+fi

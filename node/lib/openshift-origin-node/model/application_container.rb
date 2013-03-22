@@ -456,15 +456,51 @@ module OpenShift
       @cartridge_model.do_control("reload", cart_name)
     end
 
-    # restore gear from tar ball
-    def restore(cart_name)
-      raise NotImplementedError.new("restore")
+    ##
+    # Creates a snapshot of a gear.
+    #
+    # Writes an archive (in tar.gz format) to the calling process' STDOUT
+    def snapshot
+      stop
+      # invoke carts' pre-snapshot hooks
+      @cartridge_model.each_cartridge do |cartridge|
+        @cartridge_model.connector_execute(cartridge.name, 'pre-snapshot', nil)
+      end
+
+      # build exclusion list
+      # create archive and write to STDOUT
+
+      # invoke carts' post-snapshot hooks
+      @cartridge_model.each_cartridge do |cartridge|
+        @cartridge_model.connector_execute(cartridge.name, 'pre-snapshot', nil)
+      end      
+
+      start
     end
 
-    # write gear to tar ball
-    def snapshot(cart_name)
-      raise NotImplementedError.new("snapshot")
+    ##
+    # Restores a gear from an archive read from STDIN
+    def restore(restore_git_repo = false)
+      if restore_git_repo
+        pre_receive
+      else
+        stop
+      end
+
+      # build transform list
+      # extract archive
+      # invoke cartridges' post-restore hooks
+      @cartridge_model.each_cartridge do |cartridge|
+        @cartridge_model.connector_execute(cartridge.name, 'post-restore', nil)
+      end
+
+      if restore_git_repo
+        post_receive
+      else
+        start
+      end
     end
+
 
     def status(cart_name)
       @cartridge_model.do_control("status", cart_name)

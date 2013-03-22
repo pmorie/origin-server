@@ -167,29 +167,21 @@ end
 
 command :restore do |c|
   c.syntax = "#{name} restore"
-  
-  c.option "--cart CART", "The cart to restore"
+  # TODO: rename to something nicer, translate in oo-restore
+  c.option "INCLUDE_GIT", "Rebuild the appliction as part of restoration"
 
   c.description = "Restore a cart"
   c.action do |args, options|
-    # TODO: Is this a gear level operation?
-    options.cart ||= choose("Cart to restore?", *gear_cartridge_names)
     @container.restore(options.cart)
   end
 end
 
 command :snapshot do |c|
   c.syntax = "#{name} snapshot"
-  
-  c.option "--cart CART", "The cart to snapshot"
-
   c.description = "Snapshot a cart"
   c.action do |args, options|
-    # TODO: Is this a gear level operation?
-    options.cart ||= choose("Cart to snapshot?", *gear_cartridge_names)
-    @container.snapshot(options.cart)
+    @container.snapshot
   end
 end
-
 
 default_command :status

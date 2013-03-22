@@ -27,7 +27,11 @@ mkdir -p %{buildroot}%{_sbindir}
 mkdir -p %{buildroot}%{_bindir}
 
 cp bin/oo-* %{buildroot}%{_sbindir}/
+rm %{buildroot}%{_sbindir}/oo-snapshot
+rm %{buildroot}%{_sbindir}/oo-restore
 cp bin/rhc-* %{buildroot}%{_bindir}/
+cp bin/oo-snapshot %{buildroot}%{_bindir}/
+cp bin/oo-restore %{buildroot}%{_bindir}/
 
 %if 0%{?fedora} >= 18
   mv %{buildroot}%{_sbindir}/oo-httpd-singular.apache-2.4 %{buildroot}%{_sbindir}/oo-httpd-singular
