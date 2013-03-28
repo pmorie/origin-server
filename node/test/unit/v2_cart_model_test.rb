@@ -116,6 +116,9 @@ class V2CartModelTest < Test::Unit::TestCase
               - Frontend:      "/front2"
                 Backend:       "/back2"
                 Options:       { file: true }
+              - Frontend:      "/front2a"
+                Backend:       "/back2a"
+                Options:       { repo_file: true }
           
           - Private-IP-Name:   EXAMPLE_IP1
             Private-Port-Name: EXAMPLE_PORT3
@@ -270,6 +273,7 @@ class V2CartModelTest < Test::Unit::TestCase
                                                         %w(/var/lib/openshift/0001000100010001/cartridge2))
     @model.expects(:cartridge_teardown).with('cartridge1').returns("")
     @model.expects(:cartridge_teardown).with('cartridge2').returns("")
+    Dir.stubs(:chdir).yields
     @user.expects(:destroy)
 
     @model.destroy
@@ -283,6 +287,7 @@ class V2CartModelTest < Test::Unit::TestCase
                                                         %w(/var/lib/openshift/0001000100010001/cartridge2))
     @model.expects(:cartridge_teardown).with('cartridge1').raises(OpenShift::Utils::ShellExecutionException.new('error'))
     @model.expects(:cartridge_teardown).with('cartridge2').returns("")
+    Dir.stubs(:chdir).yields
     @user.expects(:destroy)
 
     @model.destroy
@@ -318,15 +323,18 @@ class V2CartModelTest < Test::Unit::TestCase
   def test_frontend_connect_success
     OpenShift::Utils::Environ.stubs(:for_gear).returns({
         "OPENSHIFT_MOCK_EXAMPLE_IP1" => "127.0.0.1",
-        "OPENSHIFT_MOCK_EXAMPLE_IP2" => "127.0.0.2"
+        "OPENSHIFT_MOCK_EXAMPLE_IP2" => "127.0.0.2",
+        "OPENSHIFT_REPO_DIR" => '/foo'
     })
 
     frontend = mock('OpenShift::FrontendHttpServer')
     OpenShift::FrontendHttpServer.stubs(:new).returns(frontend)
+    @mock_cartridge.expects(:directory).returns('/bar')
 
     frontend.expects(:connect).with("/front1a", "127.0.0.1:8080/back1a", { "websocket" => true, "tohttps" => true })
     frontend.expects(:connect).with("/front1b", "127.0.0.1:8080/back1b", { "noproxy" => true })
-    frontend.expects(:connect).with("/front2", "127.0.0.1:8081/back2", { "file" => true })
+    frontend.expects(:connect).with("/front2", "127.0.0.1:8081/bar/back2", { "file" => true })
+    frontend.expects(:connect).with("/front2a", "127.0.0.1:8081/foo/back2a", { "file" => true })
     frontend.expects(:connect).with("/front3", "127.0.0.1:8082/back3", {})
     frontend.expects(:connect).with("/front4", "127.0.0.2:9090/back4", {})
 

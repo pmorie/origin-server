@@ -427,7 +427,8 @@ Options:
   forbidden      Mark the path as forbidden (uri is ignored)
   noproxy        Mark the path as not proxied (uri is ignored)
   redirect       Use redirection to uri instead of proxy (uri must be a path)
-  file           Ignore request and load file path contained in uri (must be path)
+  file           Ignore request and load file path contained in uri, relative to cartridge directory (must be path)
+  repo_file      Ignore request and load file path contained in uri, relative to `$OPENSHIFT_REPO_DIR` (must be path)  
   tohttps        Redirect request to https and use the path contained in the uri (must be path)
 ```
 

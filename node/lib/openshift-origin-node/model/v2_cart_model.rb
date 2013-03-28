@@ -664,8 +664,20 @@ module OpenShift
         cartridge.endpoints.each do |endpoint|
           endpoint.mappings.each do |mapping|
             private_ip  = gear_env[endpoint.private_ip_name]
-            backend_uri = "#{private_ip}:#{endpoint.private_port}#{mapping.backend}"
             options     = mapping.options ||= {}
+
+            if options.has_key?('file')
+              backend_uri = File.join(cartridge.directory, mapping.backend.gsub(/^\//, ''))
+              #backend_uri = "#{private_ip}:#{endpoint.private_port}#{backend}"
+            elsif options.has_key?('repo_file')
+              options.delete('repo_file')
+              options['file'] = true
+              
+              backend_uri = File.join(gear_env['OPENSHIFT_REPO_DIR'], mapping.backend.gsub(/^\//, ''))
+              #backend_uri = "#{private_ip}:#{endpoint.private_port}#{backend}"
+            else
+              backend_uri = "#{private_ip}:#{endpoint.private_port}#{mapping.backend}"
+            end
 
             logger.info("Connecting frontend mapping for #{@user.uuid}/#{cartridge.name}: "\
                       "#{mapping.frontend} => #{backend_uri} with options: #{mapping.options}")
