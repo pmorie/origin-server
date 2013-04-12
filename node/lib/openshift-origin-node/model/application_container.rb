@@ -29,6 +29,8 @@ require 'openshift-origin-node/utils/node_logger'
 require 'openshift-origin-common'
 require 'yaml'
 require 'active_model'
+require 'json'
+require 'rest-client'
 
 module OpenShift
   # == Application Container
@@ -498,6 +500,12 @@ module OpenShift
     def snapshot
       stop_gear
 
+      scalable_snapshot = !!@cart_model.web_proxy 
+
+      if scalable_snapshot
+        handle_scalable_snapshot
+      end
+
       @cartridge_model.each_cartridge do |cartridge|
         @cartridge_model.do_control('pre-snapshot', 
                                     cartridge,
@@ -519,6 +527,75 @@ module OpenShift
       end      
 
       start_gear
+    end
+
+    def handle_scalable_snapshot
+      gear_env = Utils::Environ.for_gear(@user.homedir)
+
+      gear_groups = get_gear_groups(gear_env)
+
+      get_secondary_gear_groups(gear_groups).each do |group|
+        type = get_secondary_gear_group_type(group)
+
+        $stderr.puts "Saving snapshot for secondary #{type} gear"
+
+        ssh_coords = group['gears'][0]['ssh_url'].sub(/^ssh_url:\/\//, '')
+        Utils::oo_spawn("ssh #{ssh_coords} snapshot > #{type}.tar.gz",
+                        chdir: gear_env['OPENSHIFT_DATA_DIR'],
+                        uid: @user.uid,
+                        gid: @user.gid,
+                        err: $stderr,
+                        expected_exitstatus: 0)
+      end
+    end
+
+    ##
+    # Get the gear groups for the application this gear is part of.
+    # 
+    # Returns the parsed JSON for the response.
+    def get_gear_groups(gear_env)
+      broker_addr = @config.get('OPENSHIFT_BROKER_HOST')
+      domain = gear_env['OPENSHIFT_NAMESPACE']
+      app_name = env['OPENSHIFT_APP_NAME']
+      url = "https://#{broker_addr}/broker/rest/domains/#{domain}/applications/#{app_name}/gear_groups.json"
+      
+      request = RestClient::Request.new(:method => :get, 
+                                        :url => url, 
+                                        :timeout => 120,
+                                        :headers => { :accept => 'application/json;version=1.0', :user_agent => 'OpenShift' })
+      # TODO: error handling
+      begin
+        response = request.execute()
+        if 300 <= response.code 
+          raise response
+        end
+      rescue RestClient::UnprocessableEntity => e
+        raise e
+      rescue RestClient::ExceptionWithResponse => e
+        raise e
+      rescue RestClient::Exception => e
+        raise e
+      end
+
+      begin
+        gear_groups = JSON.parse(response)
+      rescue
+        # TODO: what to do?
+      end
+
+      gear_groups
+    end
+
+    ##
+    # Given a list of gear groups, return the secondary gear groups
+    def get_secondary_gear_groups(groups)
+      
+    end
+
+    ##
+    # Get the type of the database associated with a secondary gear group
+    def get_secondary_gear_group_type(group)
+
     end
 
     def snapshot_exclusions
