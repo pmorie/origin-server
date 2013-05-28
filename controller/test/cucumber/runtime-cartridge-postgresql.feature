@@ -21,6 +21,23 @@ Feature: Postgres Application Sub-Cartridge
     When I destroy the application
     Then a postgres process will not be running
 
+  Scenario: Remove and re-add postgres cartridge
+    Given a new jbossews-2.0 type application
+    When I embed a postgresql-8.4 cartridge into the application
+    When I remove the postgresql-8.4 cartridge from the application
+    When I embed a postgresql-8.4 cartridge into the application
+    When I remove the postgresql-8.4 cartridge from the application
+    When I embed a postgresql-8.4 cartridge into the application
+    When I remove the postgresql-8.4 cartridge from the application
+
+  Scenario: Remove and re-add postgres cartridge (client tools)
+    Given a new client created jbossews-2.0 application
+    When the embedded postgresql-8.4 cartridge is added
+    When the embedded postgresql-8.4 cartridge is removed
+    When the embedded postgresql-8.4 cartridge is added
+    When the embedded postgresql-8.4 cartridge is removed
+    When the embedded postgresql-8.4 cartridge is added
+
   @runtime_extended1
   Scenario: Database connections
     Given a new client created mock-0.1 application
