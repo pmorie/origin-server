@@ -228,9 +228,22 @@ module OpenShift
     #
     #   CartridgeRepository.instance.erase('cobol', '2002', '1.0') #=> false
     def exist?(cartridge_name, cartridge_version, version)
-      @index.key?(cartridge_name) &&
-          @index[cartridge_name].key?(version) &&
-          @index[cartridge_name][version].key?(cartridge_version)
+      if !@index.key?(cartridge_name) 
+        logger.debug("Couldn't find #{cartridge_name} in index")
+        return false
+      end
+
+      if !@index[cartridge_name].key?(version)
+        logger.debug("Couldn't find #{cartridge_name}:#{version}")
+        return false
+      end
+
+      if !@index[cartridge_name][version].key?(cartridge_version)
+        logger.debug("Couldn't find #{cartridge_name}:#{version}:#{cartridge_version}")
+        return false
+      end
+
+      true
     end
 
     # :call-seq:
