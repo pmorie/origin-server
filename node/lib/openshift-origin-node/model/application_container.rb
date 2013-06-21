@@ -58,6 +58,8 @@ module OpenShift
                                        app_name, container_name, namespace, quota_blocks, quota_files)
       @state            = OpenShift::Utils::ApplicationState.new(container_uuid)
       @hourglass        = hourglass || Utils::Hourglass.new(3600)
+      @timeout          = 30
+      @cartridges       = {}
 
       @cartridge_model = V2CartridgeModel.new(@config, @user, @state, @hourglass)
     end
@@ -66,6 +68,121 @@ module OpenShift
       @uuid
     end
 
+    #
+    # Yields a +Cartridge+ instance for each cartridge in the gear.
+    #
+    def each_cartridge
+      process_cartridges do |cartridge_dir|
+        cartridge = get_cartridge_from_directory(File.basename(cartridge_dir))
+        yield cartridge
+      end
+    end
+
+    #
+    # Returns the primary +Cartridge+ in the gear as specified by the
+    # +OPENSHIFT_PRIMARY_CARTRIDGE_DIR+ environment variable, or +Nil+ if
+    # no primary cartridge is present.
+    #
+    def primary_cartridge
+      env              = Utils::Environ.for_gear(@user.homedir)
+      primary_cart_dir = env['OPENSHIFT_PRIMARY_CARTRIDGE_DIR']
+
+      raise "No primary cartridge detected in gear #{@user.uuid}" unless primary_cart_dir
+
+      return get_cartridge_from_directory(File.basename(primary_cart_dir))
+    end
+
+    #
+    # Returns the +Cartridge+ in the gear whose +web_proxy+ flag is set to
+    # true, nil otherwise
+    #
+    def web_proxy
+      each_cartridge do |cartridge|
+        return cartridge if cartridge.web_proxy?
+      end
+
+      nil
+    end
+
+    #
+    # Detects and returns a builder +Cartridge+ in the gear if present, otherwise +nil+.
+    #
+    def builder_cartridge
+      builder_cart = nil
+
+      each_cartridge do |c|
+        if c.categories.include? 'ci_builder'
+          builder_cart = c
+          break
+        end
+      end
+
+      builder_cart
+    end
+
+    #
+    # FIXME: Once Broker/Node protocol updated to provided necessary information this hack must go away
+    #
+    def map_cartridge_name(cartridge_name)
+      results = cartridge_name.scan(/([a-zA-Z\d-]+)-([\d\.]+)/).first
+      raise "Invalid cartridge identifier '#{cartridge_name}': expected name-version" unless results && 2 == results.size
+      results
+    end
+
+    #
+    # Return the directory for a given cartridge name in the gear.
+    #
+    def cartridge_directory(cart_name)
+      name, _  = map_cartridge_name(cart_name)
+      cart_dir = Dir.glob(PathUtils.join(@user.homedir, "#{name}"))
+      raise "Ambiguous cartridge name #{cart_name}: found #{cart_dir}:#{cart_dir.size}" if 1 < cart_dir.size
+      raise "Cartridge directory not found for #{cart_name}" if  1 > cart_dir.size
+
+      File.basename(cart_dir.first)
+    end
+
+    #
+    # Load the cartridge's local manifest from the Broker token 'name-version'
+    #
+    def get_cartridge(cart_name)
+      unless @cartridges.has_key? cart_name
+        cart_dir = ''
+        begin
+          cart_dir = cartridge_directory(cart_name)
+
+          @cartridges[cart_name] = get_cartridge_from_directory(cart_dir)
+        rescue Exception => e
+          logger.error e.message
+          logger.error e.backtrace.join("\n")
+          raise "Failed to get cartridge '#{cart_name}' from #{cart_dir} in gear #{@user.uuid}: #{e.message}"
+        end
+      end
+
+      @cartridges[cart_name]
+    end
+
+    # Load cartridge's local manifest from cartridge directory name
+    def get_cartridge_from_directory(directory)
+      raise "Directory name is required" if (directory == nil || directory.empty?)
+
+      unless @cartridges.has_key? directory
+        cartridge_path = PathUtils.join(@user.homedir, directory)
+        manifest_path  = PathUtils.join(cartridge_path, 'metadata', 'manifest.yml')
+        ident_path     = Dir.glob(PathUtils.join(cartridge_path, 'env', "OPENSHIFT_*_IDENT")).first
+
+        raise "Cartridge manifest not found: #{manifest_path} missing" unless File.exists?(manifest_path)
+        raise "Cartridge Ident not found: #{ident_path} missing" unless File.exists?(ident_path)
+
+        _, _, version, _ = Runtime::Manifest.parse_ident(IO.read(ident_path))
+
+        @cartridges[directory] = OpenShift::Runtime::Manifest.new(manifest_path, version, @user.homedir)
+      end
+      
+      @cartridges[directory]
+    end
+
+
+    #
     # Add cartridge to gear.  This method establishes the cartridge model
     # to use, but does not mark the application.  Marking the application
     # is the responsibility of the cart model.
@@ -169,12 +286,45 @@ module OpenShift
       notify_observers(:before_container_destroy)
 
       # possible mismatch across cart model versions
-      output, errout, retcode = @cartridge_model.destroy(skip_hooks)
+      output, errout, retcode = perform_destroy(skip_hooks)
 
       notify_observers(:after_container_destroy)
 
       return output, errout, retcode
     end
+
+    # destroy(skip_hooks = false) -> [buffer, '', 0]
+    #
+    # Remove all cartridges from a gear and delete the gear.  Accepts
+    # and discards any parameters to comply with the signature of V1
+    # require, which accepted a single argument.
+    #
+    # destroy() => ['', '', 0]
+    def perform_destroy(skip_hooks = false)  # NOTE: renamed while inlining v2 cart model
+      logger.info('V2 destroy')
+
+      buffer = ''
+      unless skip_hooks
+        each_cartridge do |cartridge|
+          unlock_gear(cartridge, false) do |c|
+            begin
+              buffer << cartridge_teardown(c.directory, false)
+            rescue Utils::ShellExecutionException => e
+              logger.warn("Cartridge teardown operation failed on gear #{@user.uuid} for cartridge #{c.directory}: #{e.message} (rc=#{e.rc})")
+            end
+          end
+        end
+      end
+
+      # Ensure we're not in the gear's directory
+      Dir.chdir(@config.get("GEAR_BASE_DIR"))
+
+      @user.destroy
+
+      # FIXME: V1 contract is there a better way?
+      [buffer, '', 0]
+    end
+
 
     # Public: Sets the app state to "stopped" and causes an immediate forced
     # termination of all gear processes.
@@ -430,11 +580,11 @@ module OpenShift
     #   :hot_deploy : a boolean to toggle hot deploy for the operation (default: false)
     #
     def pre_receive(options={})
-      builder_cartridge = @cartridge_model.builder_cartridge
+      builder_cart = builder_cartridge
 
-      if builder_cartridge
+      if builder_cart
         @cartridge_model.do_control('pre-receive',
-                                    builder_cartridge,
+                                    builder_cart,
                                     out: options[:out],
                                     err: options[:err])
       else
@@ -462,16 +612,16 @@ module OpenShift
     #   :hot_deploy : a boolean to toggle hot deploy for the operation (default: false)
     #
     def post_receive(options={})
-      builder_cartridge = @cartridge_model.builder_cartridge
+      builder_cartridge = builder_cartridge
 
-      if builder_cartridge
+      if builder_cart
         @cartridge_model.do_control('post-receive',
-                                    builder_cartridge,
+                                    builder_cart,
                                     out: options[:out],
                                     err: options[:err])
       else
         @cartridge_model.do_control('pre-repo-archive',
-                                    @cartridge_model.primary_cartridge,
+                                    primary_cartridge,
                                     out:                       options[:out],
                                     err:                       options[:err],
                                     pre_action_hooks_enabled:  false,
@@ -502,7 +652,7 @@ module OpenShift
     # 
     def remote_deploy(options={})
       @cartridge_model.do_control('update-configuration',
-                                  @cartridge_model.primary_cartridge,
+                                  primary_cartridge,
                                   pre_action_hooks_enabled:  false,
                                   post_action_hooks_enabled: false,
                                   out:                       options[:out],
@@ -511,12 +661,12 @@ module OpenShift
       deploy(options)
 
       if options[:init]
-        primary_cart_env_dir = File.join(@user.homedir, @cartridge_model.primary_cartridge.directory, 'env')
+        primary_cart_env_dir = File.join(@user.homedir, primary_cartridge.directory, 'env')
         primary_cart_env     = Utils::Environ.load(primary_cart_env_dir)
         ident                = primary_cart_env.keys.grep(/^OPENSHIFT_.*_IDENT/)
         _, _, version, _     = Runtime::Manifest.parse_ident(primary_cart_env[ident.first])
 
-        @cartridge_model.post_install(@cartridge_model.primary_cartridge,
+        @cartridge_model.post_install(primary_cartridge,
                                       version,
                                       out: options[:out],
                                       err: options[:err])
@@ -542,21 +692,21 @@ module OpenShift
       buffer = ''
 
       buffer << @cartridge_model.do_control('update-configuration',
-                                            @cartridge_model.primary_cartridge,
+                                            primary_cartridge,
                                             pre_action_hooks_enabled:  false,
                                             post_action_hooks_enabled: false,
                                             out:                       options[:out],
                                             err:                       options[:err])
 
       buffer << @cartridge_model.do_control('pre-build',
-                                            @cartridge_model.primary_cartridge,
+                                            primary_cartridge,
                                             pre_action_hooks_enabled: false,
                                             prefix_action_hooks:      false,
                                             out:                      options[:out],
                                             err:                      options[:err])
 
       buffer << @cartridge_model.do_control('build',
-                                            @cartridge_model.primary_cartridge,
+                                            primary_cartridge,
                                             pre_action_hooks_enabled: false,
                                             prefix_action_hooks:      false,
                                             out:                      options[:out],
@@ -594,7 +744,7 @@ module OpenShift
 
       @state.value = OpenShift::State::DEPLOYING
 
-      web_proxy_cart = @cartridge_model.web_proxy
+      web_proxy_cart = web_proxy
       if web_proxy_cart
         buffer << @cartridge_model.do_control('deploy',
                                               web_proxy_cart,
@@ -605,7 +755,7 @@ module OpenShift
       end
 
       buffer << @cartridge_model.do_control('deploy',
-                                            @cartridge_model.primary_cartridge,
+                                            primary_cartridge,
                                             pre_action_hooks_enabled: false,
                                             prefix_action_hooks:      false,
                                             out:                      options[:out],
@@ -618,7 +768,7 @@ module OpenShift
                            err:            options[:err])
 
       buffer << @cartridge_model.do_control('post-deploy',
-                                            @cartridge_model.primary_cartridge,
+                                            primary_cartridge,
                                             pre_action_hooks_enabled: false,
                                             prefix_action_hooks:      false,
                                             out:                      options[:out],
@@ -670,7 +820,7 @@ module OpenShift
     def snapshot
       stop_gear
 
-      scalable_snapshot = !!@cartridge_model.web_proxy 
+      scalable_snapshot = !!web_proxy 
 
       if scalable_snapshot
         begin
@@ -683,7 +833,7 @@ module OpenShift
         end
       end
 
-      @cartridge_model.each_cartridge do |cartridge|
+      each_cartridge do |cartridge|
         @cartridge_model.do_control('pre-snapshot', 
                                     cartridge,
                                     err: $stderr,
@@ -694,13 +844,13 @@ module OpenShift
 
       exclusions = []
 
-      @cartridge_model.each_cartridge do |cartridge|
+      each_cartridge do |cartridge|
         exclusions |= snapshot_exclusions(cartridge)
       end
 
       write_snapshot_archive(exclusions)
 
-      @cartridge_model.each_cartridge do |cartridge|
+      each_cartridge do |cartridge|
         @cartridge_model.do_control('post-snapshot', 
                                     cartridge, 
                                     err: $stderr,
@@ -826,7 +976,7 @@ module OpenShift
     def restore(restore_git_repo)
       gear_env = Utils::Environ.for_gear(@user.homedir)
 
-      scalable_restore = !!@cartridge_model.web_proxy 
+      scalable_restore = !!web_proxy 
       gear_groups = nil
 
       if scalable_restore
@@ -839,7 +989,7 @@ module OpenShift
         stop_gear
       end
 
-      @cartridge_model.each_cartridge do |cartridge|
+      each_cartridge do |cartridge|
         @cartridge_model.do_control('pre-restore', 
                                     cartridge,
                                     pre_action_hooks_enabled: false,
@@ -850,7 +1000,7 @@ module OpenShift
       prepare_for_restore(restore_git_repo, gear_env)
 
       transforms = []
-      @cartridge_model.each_cartridge do |cartridge|
+      each_cartridge do |cartridge|
         transforms |= restore_transforms(cartridge)
       end
 
@@ -860,7 +1010,7 @@ module OpenShift
         handle_scalable_restore(gear_groups, gear_env)
       end
 
-      @cartridge_model.each_cartridge do |cartridge|
+      each_cartridge do |cartridge|
         @cartridge_model.do_control('post-restore',
                                      cartridge,
                                      pre_action_hooks_enabled: false,
@@ -895,7 +1045,7 @@ module OpenShift
       transforms << 's|git/.*\.git|git/${OPENSHIFT_GEAR_NAME}.git|'
 
       # TODO: use all installed cartridges, not just ones in current instance directory
-      @cartridge_model.each_cartridge do |cartridge|
+      each_cartridge do |cartridge|
         excludes << "./*/#{cartridge.directory}/data"
       end
 
@@ -1016,6 +1166,15 @@ module OpenShift
 
       Process.detach(pid)
     end
+
+    def stop_lock
+      File.join(@user.homedir, 'app-root', 'runtime', '.stop_lock')
+    end
+
+    def stop_lock?
+      File.exists?(stop_lock)
+    end
+
 
     #
     # Public: Return an ApplicationContainer object loaded from the container_uuid on the system
