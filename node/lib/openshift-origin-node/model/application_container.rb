@@ -27,6 +27,8 @@ require 'openshift-origin-node/utils/sdk'
 require 'openshift-origin-node/utils/node_logger'
 require 'openshift-origin-node/utils/hourglass'
 require 'openshift-origin-node/utils/cgroups'
+require 'openshift-origin-node/utils/managed_files'
+require 'openshift-origin-node/utils/sanitize'
 require 'openshift-origin-common'
 require 'yaml'
 require 'active_model'
@@ -181,6 +183,190 @@ module OpenShift
       @cartridges[directory]
     end
 
+    #----- Gear locking methods -----
+
+    # unlock_gear(cartridge_name) -> nil
+    #
+    # Prepare the given cartridge for the cartridge author
+    #
+    #   v2_cart_model.unlock_gear('php-5.3')
+    def unlock_gear(cartridge, relock = true)
+      begin
+        do_unlock(locked_files(cartridge))
+        yield cartridge
+      ensure
+        do_lock(locked_files(cartridge)) if relock
+      end
+      nil
+    end
+
+    # do_unlock_gear(array of file names) -> array
+    #
+    # Take the given array of file system entries and prepare them for the cartridge author
+    #
+    #   v2_cart_model.do_unlock_gear(entries)
+    def do_unlock(entries)
+      mcs_label = Utils::SELinux.get_mcs_label(@user.uid)
+
+      entries.each do |entry|
+        if entry.end_with?('/')
+          entry.chomp!('/')
+          FileUtils.mkpath(entry, mode: 0755) unless File.exist? entry
+        else
+          # FileUtils.touch not used as it doesn't support mode
+          File.new(entry, File::CREAT|File::TRUNC|File::WRONLY, 0644).close() unless File.exist?(entry)
+        end
+        # It is expensive doing one file at a time but...
+        # ...it allows reporting on the failed command at the file level
+        # ...we don't have to worry about the length of argv
+        begin
+          PathUtils.oo_chown(@user.uid, @user.gid, entry)
+          Utils::SELinux.set_mcs_label(mcs_label, entry)
+        rescue Exception => e
+          raise OpenShift::FileUnlockError.new("Failed to unlock file system entry [#{entry}]: #{e}",
+                                               entry)
+        end
+      end
+
+      begin
+        PathUtils.oo_chown(@user.uid, @user.gid, @user.homedir)
+      rescue Exception => e
+        raise OpenShift::FileUnlockError.new(
+                  "Failed to unlock gear home [#{@user.homedir}]: #{e}",
+                  @user.homedir)
+      end
+    end
+
+    # do_lock_gear(array of file names) -> array
+    #
+    # Take the given array of file system entries and prepare them for the application developer
+    #    v2_cart_model.do_lock_gear(entries)
+    def do_lock(entries)
+      mcs_label = Utils::SELinux.get_mcs_label(@user.uid)
+
+      # It is expensive doing one file at a time but...
+      # ...it allows reporting on the failed command at the file level
+      # ...we don't have to worry about the length of argv
+      entries.each do |entry|
+        begin
+          PathUtils.oo_chown(0, @user.gid, entry)
+          Utils::SELinux.set_mcs_label(mcs_label, entry)
+        rescue Exception => e
+          raise OpenShift::FileLockError.new("Failed to lock file system entry [#{entry}]: #{e}",
+                                             entry)
+        end
+      end
+
+      begin
+        PathUtils.oo_chown(0, @user.gid, @user.homedir)
+      rescue Exception => e
+        raise OpenShift::FileLockError.new("Failed to lock gear home [#{@user.homedir}]: #{e}",
+                                           @user.homedir)
+      end
+    end
+
+    #----- Cartridge add/remove internal methods -----
+
+    # create_cartridge_directory(cartridge name) -> nil
+    #
+    # Create the cartridges home directory
+    #
+    #   v2_cart_model.create_cartridge_directory('php-5.3')
+    def create_cartridge_directory(cartridge, software_version)
+      logger.info("Creating cartridge directory #{@user.uuid}/#{cartridge.directory}")
+
+      target = File.join(@user.homedir, cartridge.directory)
+      CartridgeRepository.instantiate_cartridge(cartridge, target)
+
+      ident = Runtime::Manifest.build_ident(cartridge.cartridge_vendor,
+                                            cartridge.name,
+                                            software_version,
+                                            cartridge.cartridge_version)
+
+      envs                                  = {}
+      envs["#{cartridge.short_name}_DIR"]   = target + File::SEPARATOR
+      envs["#{cartridge.short_name}_IDENT"] = ident
+
+      write_environment_variables(File.join(target, 'env'), envs)
+
+      envs.clear
+      envs['namespace'] = @user.namespace if @user.namespace
+
+      # If there's not already a primary cartridge on the gear, assume
+      # the new cartridge is the primary.
+      current_gear_env = Utils::Environ.for_gear(@user.homedir)
+      unless current_gear_env['OPENSHIFT_PRIMARY_CARTRIDGE_DIR']
+        envs['primary_cartridge_dir'] = target + File::SEPARATOR
+        logger.info("Cartridge #{cartridge.name} recorded as primary within gear #{@user.uuid}")
+      end
+
+      unless envs.empty?
+        write_environment_variables(File.join(@user.homedir, '.env'), envs)
+      end
+
+      # Gear level actions: Placed here to be off the V1 code path...
+      old_path = File.join(@user.homedir, '.env', 'PATH')
+      File.delete(old_path) if File.file? old_path
+
+      secure_cartridge(cartridge.short_name, @user.uid, @user.gid, target)
+
+      logger.info("Created cartridge directory #{@user.uuid}/#{cartridge.directory}")
+      nil
+    end
+
+    # process_erb_templates(cartridge_name) -> nil
+    #
+    # Search cartridge for any remaining <code>erb</code> files render them
+    def process_erb_templates(cartridge)
+      directory = PathUtils.join(@user.homedir, cartridge.name)
+      logger.info "Processing ERB templates for #{cartridge.name}"
+
+      env  = Utils::Environ.for_gear(@user.homedir, directory)
+      erbs = processed_templates(cartridge).map { |x| PathUtils.join(@user.homedir, x) }
+      render_erbs(env, erbs)
+    end    
+
+    def secure_cartridge(short_name, uid, gid=uid, cartridge_home)
+      Dir.chdir(cartridge_home) do
+        make_user_owned(cartridge_home)
+
+        files = ManagedFiles::IMMUTABLE_FILES.collect do |file|
+          file.gsub!('*', short_name)
+          file if File.exist?(file)
+        end || []
+        files.compact!
+
+        unless files.empty?
+          PathUtils.oo_chown(0, gid, files)
+          FileUtils.chmod(0644, files)
+        end
+      end
+    end
+
+    ##
+    # Write out environment variables.
+    def write_environment_variables(path, hash, prefix = true)
+      FileUtils.mkpath(path) unless File.exist? path
+
+      hash.each_pair do |k, v|
+        name = k.to_s.upcase
+
+        if prefix
+          name = "OPENSHIFT_#{name}"
+        end
+
+        File.open(PathUtils.join(path, name), 'w', 0666) do |f|
+          f.write(v)
+        end
+      end
+    end
+
+    def delete_cartridge_directory(cartridge)
+      logger.info("Deleting cartridge directory for #{@user.uuid}/#{cartridge.directory}")
+      # TODO: rm_rf correct?
+      FileUtils.rm_rf(File.join(@user.homedir, cartridge.directory))
+      logger.info("Deleted cartridge directory for #{@user.uuid}/#{cartridge.directory}")
+    end    
 
     #
     # Add cartridge to gear.  This method establishes the cartridge model
@@ -196,7 +382,54 @@ module OpenShift
     # @param template_git_url  URL for template application source/bare repository
     # @param manifest          Broker provided manifest
     def configure(cart_name, template_git_url=nil,  manifest=nil)
-      @cartridge_model.configure(cart_name, template_git_url, manifest)
+      output                 = ''
+      name, software_version = map_cartridge_name(cartridge_name)
+      cartridge              = if manifest
+                                 logger.debug("Loading from manifest...")
+                                 Runtime::Manifest.new(manifest, software_version)
+                               else
+                                 CartridgeRepository.instance.select(name, software_version)
+                               end
+
+      OpenShift::Utils::Sdk.mark_new_sdk_app(@user.homedir)
+      OpenShift::Utils::Cgroups::with_no_cpu_limits(@user.uuid) do
+        create_cartridge_directory(cartridge, software_version)
+        # Note: the following if statement will check the following criteria long-term:
+        # 1. Is the app scalable?
+        # 2. Is this the head gear?
+        # 3. Is this the first time the platform has generated an ssh key?
+        #
+        # In the current state of things, the following check is sufficient to test all
+        # of these criteria, and we do not have a way to explicitly check the first two
+        # criteria.  However, it should be considered a TODO to add more explicit checks.
+        if cartridge.web_proxy?
+          output << generate_ssh_key(cartridge)
+        end
+
+        create_private_endpoints(cartridge)
+
+        Dir.chdir(PathUtils.join(@user.homedir, cartridge.directory)) do
+          unlock_gear(cartridge) do |c|
+            output << cartridge_action(cartridge, 'setup', software_version, true)
+            process_erb_templates(c)
+            output << cartridge_action(cartridge, 'install', software_version)
+            output << populate_gear_repo(c.directory, template_git_url) if cartridge.deployable?
+          end
+
+        end
+
+        connect_frontend(cartridge)
+      end
+
+      logger.info "configure output: #{output}"
+      return output
+    rescue Utils::ShellExecutionException => e
+      rc_override = e.rc < 100 ? 157 : e.rc
+      raise Utils::Sdk.translate_shell_ex_for_client(e, rc_override)
+    rescue => e
+      ex =  RuntimeError.new(Utils::Sdk.translate_out_for_client(e.message, :error))
+      ex.set_backtrace(e.backtrace)
+      raise ex
     end
 
     def post_configure(cart_name, template_git_url=nil)
@@ -241,19 +474,72 @@ module OpenShift
         end
       end
 
-      output = @cartridge_model.post_configure(cart_name)
+      output = ''
+
+      begin
+        name, software_version = map_cartridge_name(cartridge_name)
+        cartridge              = get_cartridge(name)
+
+        OpenShift::Utils::Cgroups::with_no_cpu_limits(@user.uuid) do
+          output << start_cartridge('start', cartridge, user_initiated: true)
+          output << cartridge_action(cartridge, 'post_install', software_version)
+        end
+
+        logger.info("post-configure output: #{output}")
+      rescue Utils::ShellExecutionException => e
+        raise Utils::Sdk.translate_shell_ex_for_client(e, 157)
+      end
 
       output
     end
 
-    # Remove cartridge from gear
+    def post_install(cartridge, software_version, options = {})
+      output = cartridge_action(cartridge, 'post_install', software_version)
+      options[:out].puts(output) if options[:out]
+      output
+    end
+
+    #
+    # deconfigure(cartridge_name) -> nil
+    #
+    # Remove cartridge from gear with the following workflow:
+    #
+    #   1. Delete private endpoints
+    #   2. Stop the cartridge
+    #   3. Execute the cartridge `control teardown` action
+    #   4. Disconnect the frontend for the cartridge
+    #   5. Delete the cartridge directory
+    #
+    # If the cartridge stop or teardown operations fail, the error output will be
+    # captured, but the frontend will still be disconnect and the cartridge directory
+    # will be deleted.
     #
     # context: root -> gear user -> root
     # @param cart_name   cartridge name
     def deconfigure(cart_name)
-      @cartridge_model.deconfigure(cart_name)
+      teardown_output = ''
+
+      cartridge = get_cartridge(cartridge_name)
+      delete_private_endpoints(cartridge)
+      OpenShift::Utils::Cgroups::with_no_cpu_limits(@user.uuid) do
+        begin
+          stop_cartridge(cartridge, user_initiated: true)
+          unlock_gear(cartridge, false) do |c|
+            teardown_output << cartridge_teardown(c.directory)            
+          end
+        rescue Utils::ShellExecutionException => e
+          teardown_output << Utils::Sdk::translate_out_for_client(e.stdout, :error)
+          teardown_output << Utils::Sdk::translate_out_for_client(e.stderr, :error)
+        ensure
+          disconnect_frontend(cartridge)
+          delete_cartridge_directory(cartridge)
+        end
+      end
+
+      teardown_output
     end
 
+    #
     # Unsubscribe from a cart
     #
     # @param cart_name   unsubscribing cartridge name
@@ -270,9 +556,6 @@ module OpenShift
       notify_observers(:before_container_create)
 
       @user.create
-      if :v2 == OpenShift::Utils::Sdk.node_default_model(@config)
-        Utils::Sdk.mark_new_sdk_app(@user.homedir)
-      end
 
       notify_observers(:after_container_create)
     end
@@ -446,8 +729,15 @@ module OpenShift
         # clear out the tmp dir
         gear_level_tidy_tmp(gear_tmp_dir)
 
-        # Delegate to cartridge model to perform cart-level tidy operations for all installed carts.
-        @cartridge_model.tidy
+        # tidy each cartridge
+        each_cartridge do |cartridge|
+          begin
+            output = do_control('tidy', cartridge)
+          rescue Utils::ShellExecutionException => e
+            logger.warn("Tidy operation failed for cartridge #{cartridge.name} on "\
+                        "gear #{@user.uuid}: #{e.message} (rc=#{e.rc}), output=#{output}")
+          end
+        end
 
         # git gc - do this last to maximize room  for git to write changes
         gear_level_tidy_git(gear_repo_dir)
