@@ -314,6 +314,36 @@ module OpenShift
       nil
     end
 
+    # cartridge_teardown(cartridge_name, remove_cartridge_dir) -> buffer
+    #
+    # Returns the output from calling the cartridge's teardown script.
+    #  Raises exception if script fails
+    #
+    # stdout = cartridge_teardown('php-5.3')
+    def cartridge_teardown(cartridge_name, remove_cartridge_dir=true)
+      cartridge_home = File.join(@user.homedir, cartridge_name)
+      env            = Utils::Environ.for_gear(@user.homedir, cartridge_home)
+      teardown       = File.join(cartridge_home, 'bin', 'teardown')
+
+      return "" unless File.exists? teardown
+      return "#{teardown}: is not executable\n" unless File.executable? teardown
+
+      # FIXME: Will anyone retry if this reports error, or should we remove from disk no matter what?
+      buffer, err, _ = Utils.oo_spawn(teardown,
+                                      env:                 env,
+                                      unsetenv_others:     true,
+                                      chdir:               cartridge_home,
+                                      uid:                 @user.uid,
+                                      timeout:             @hourglass.remaining,
+                                      expected_exitstatus: 0)
+
+      buffer << err
+
+      FileUtils.rm_r(cartridge_home) if remove_cartridge_dir
+      logger.info("Ran teardown for #{@user.uuid}/#{cartridge_name}")
+      buffer
+    end    
+
     # process_erb_templates(cartridge_name) -> nil
     #
     # Search cartridge for any remaining <code>erb</code> files render them
@@ -324,8 +354,35 @@ module OpenShift
       env  = Utils::Environ.for_gear(@user.homedir, directory)
       erbs = processed_templates(cartridge).map { |x| PathUtils.join(@user.homedir, x) }
       render_erbs(env, erbs)
+    end
+
+    # render_erbs(program environment as a hash, erbs) -> nil
+    #
+    # Run <code>erb</code> against each template file submitted
+    #
+    #   v2_cart_model.render_erbs({HOMEDIR => '/home/no_place_like'}, ['/var/lib/openshift/user/cart/foo.erb', ...])
+    def render_erbs(env, erbs)
+      erbs.each do |file|
+        begin
+          Utils.oo_spawn(%Q{/usr/bin/oo-erb -S 2 -- #{file} > #{file.chomp('.erb')}},
+                         env:                 env,
+                         unsetenv_others:     true,
+                         chdir:               @user.homedir,
+                         uid:                 @user.uid,
+                         timeout:             @hourglass.remaining,
+                         expected_exitstatus: 0)
+        rescue Utils::ShellExecutionException => e
+          logger.info("Failed to render ERB #{file}: #{e.stderr}")
+        else
+          File.delete(file)
+        end
+      end
+      nil
     end    
 
+    #
+    # Make the cartridge directory user-owned and make the immutable files root owned
+    #
     def secure_cartridge(short_name, uid, gid=uid, cartridge_home)
       Dir.chdir(cartridge_home) do
         make_user_owned(cartridge_home)
@@ -342,6 +399,33 @@ module OpenShift
         end
       end
     end
+
+    # :call-seq:
+    #   model.populate_gear_repo(cartridge name) => nil
+    #   model.populate_gear_repo(cartridge name, application git template url) -> nil
+    #
+    # Populate the gear git repository with a sample application
+    #
+    #   model.populate_gear_repo('ruby-1.9')
+    #   model.populate_gear_repo('ruby-1.9', 'http://rails-example.example.com')
+    def populate_gear_repo(cartridge_name, template_url = nil)
+      logger.info "Creating gear repo for #{@user.uuid}/#{cartridge_name} from `#{template_url}`"
+
+      repo = ApplicationRepository.new(@user)
+      if template_url.nil?
+        repo.populate_from_cartridge(cartridge_name)
+      else
+        repo.populate_from_url(cartridge_name, template_url)
+      end
+
+      if repo.exist?
+        repo.archive
+        "CLIENT_DEBUG: The cartridge #{cartridge_name} deployed a template application"
+      else
+        "CLIENT_MESSAGE: The cartridge #{cartridge_name} did not provide template application"
+      end
+    end
+
 
     ##
     # Write out environment variables.
@@ -539,13 +623,277 @@ module OpenShift
       teardown_output
     end
 
+    #  cartridge_action(cartridge, action, software_version, render_erbs) -> buffer
+    #
+    #  Returns the results from calling a cartridge's action script.
+    #  Includes <code>--version</code> if provided.
+    #  Raises exception if script fails
+    #
+    #   stdout = cartridge_action(cartridge_obj)
+    def cartridge_action(cartridge, action, software_version, render_erbs=false)
+      logger.info "Running #{action} for #{@user.uuid}/#{cartridge.directory}"
+
+      cartridge_home = File.join(@user.homedir, cartridge.directory)
+      action         = File.join(cartridge_home, 'bin', action)
+      return "" unless File.exists? action
+
+      gear_env           = Utils::Environ.for_gear(@user.homedir)
+      cartridge_env_home = File.join(cartridge_home, 'env')
+
+      cartridge_env = gear_env.merge(Utils::Environ.load(cartridge_env_home))
+      if render_erbs
+        erbs = Dir.glob(cartridge_env_home + '/*.erb', File::FNM_DOTMATCH).select { |f| File.file?(f) }
+        render_erbs(cartridge_env, erbs)
+        cartridge_env = gear_env.merge(Utils::Environ.load(cartridge_env_home))
+      end
+
+      action << " --version #{software_version}"
+      out, _, _ = Utils.oo_spawn(action,
+                                 env:                 cartridge_env,
+                                 unsetenv_others:     true,
+                                 chdir:               cartridge_home,
+                                 uid:                 @user.uid,
+                                 timeout:             @hourglass.remaining,
+                                 expected_exitstatus: 0)
+      logger.info("Ran #{action} for #{@user.uuid}/#{cartridge.directory}\n#{out}")
+      out
+    end
+
+    # ----- Endpoint methods -----
+    # Expose an endpoint for a cartridge through the port proxy.
+    #
+    # Returns nil on success, or raises an exception if any errors occur: all errors
+    # here are considered fatal.
+    def create_public_endpoint(cartridge, endpoint, private_ip)
+      proxy = OpenShift::FrontendProxyServer.new
+
+      # Add the public-to-private endpoint-mapping to the port proxy
+      public_port = proxy.add(@user.uid, private_ip, endpoint.private_port)
+
+      @user.add_env_var(endpoint.public_port_name, public_port)
+
+      logger.info("Created public endpoint for cart #{cartridge.name} in gear #{@uuid}: "\
+        "[#{endpoint.public_port_name}=#{public_port}]")
+    end
+
+    # Allocates and assigns private IP/port entries for a cartridge
+    # based on endpoint metadata for the cartridge.
+    #
+    # Returns nil on success, or raises an exception if any errors occur: all errors
+    # here are considered fatal.
+    def create_private_endpoints(cartridge)
+      raise "Cartridge is required" unless cartridge
+      return unless cartridge.endpoints && cartridge.endpoints.length > 0
+
+      logger.info "Creating #{cartridge.endpoints.length} private endpoints for #{@user.uuid}/#{cartridge.directory}"
+
+      allocated_ips = {}
+
+      cartridge.endpoints.each do |endpoint|
+        # Reuse previously allocated IPs of the same name. When recycling
+        # an IP, double-check that it's not bound to the target port, and
+        # bail if it's unexpectedly bound.
+        unless allocated_ips.has_key?(endpoint.private_ip_name)
+          # Allocate a new IP for the endpoint
+          private_ip = find_open_ip(endpoint.private_port)
+
+          if private_ip.nil?
+            raise "No IP was available to create endpoint for cart #{cartridge.name} in gear #{@user.uuid}: "\
+              "#{endpoint.private_ip_name}(#{endpoint.private_port})"
+          end
+
+          @user.add_env_var(endpoint.private_ip_name, private_ip)
+
+          allocated_ips[endpoint.private_ip_name] = private_ip
+        end
+
+        private_ip = allocated_ips[endpoint.private_ip_name]
+
+        @user.add_env_var(endpoint.private_port_name, endpoint.private_port)
+
+        # Create the environment variable for WebSocket Port if it is specified
+        # in the manifest.
+        if endpoint.websocket_port_name && endpoint.websocket_port
+          @user.add_env_var(endpoint.websocket_port_name, endpoint.websocket_port)
+        end
+
+
+        logger.info("Created private endpoint for cart #{cartridge.name} in gear #{@user.uuid}: "\
+          "[#{endpoint.private_ip_name}=#{private_ip}, #{endpoint.private_port_name}=#{endpoint.private_port}]")
+
+        # Expose the public endpoint if ssl_to_gear option is set
+        if endpoint.options and endpoint.options["ssl_to_gear"]
+          logger.info("ssl_to_gear option set for the endpoint")
+          create_public_endpoint(cartridge, endpoint, private_ip)
+        end
+      end
+
+      # Validate all the allocations to ensure they aren't already bound. Batch up the initial check
+      # for efficiency, then do individual checks to provide better reporting before we fail.
+      address_list = cartridge.endpoints.map { |e| {ip: allocated_ips[e.private_ip_name], port: e.private_port} }
+      if !address_list.empty? && addresses_bound?(address_list)
+        failures = ''
+        cartridge.endpoints.each do |endpoint|
+          if address_bound?(allocated_ips[endpoint.private_ip_name], endpoint.private_port)
+            failures << "#{endpoint.private_ip_name}(#{endpoint.private_port})=#{allocated_ips[endpoint.private_ip_name]};"
+          end
+        end
+        raise "Failed to create the following private endpoints due to existing process bindings: #{failures}" unless failures.empty?
+      end
+    end
+
+    def delete_private_endpoints(cartridge)
+      logger.info "Deleting private endpoints for #{@user.uuid}/#{cartridge.directory}"
+
+      cartridge.endpoints.each do |endpoint|
+        @user.remove_env_var(endpoint.private_ip_name)
+        @user.remove_env_var(endpoint.private_port_name)
+      end
+
+      logger.info "Deleted private endpoints for #{@user.uuid}/#{cartridge.directory}"
+    end
+
+    # Finds the next IP address available for binding of the given port for
+    # the current gear user. The IP is assumed to be available only if the IP is 
+    # not already associated with an existing endpoint defined by any cartridge within the gear.
+    #
+    # Returns a string IP address in dotted-quad notation if one is available
+    # for the given port, or returns nil if IP is available.
+    def find_open_ip(port)
+      allocated_ips = get_allocated_private_ips
+      logger.debug("IPs already allocated for #{port} in gear #{@user.uuid}: #{allocated_ips}")
+
+      open_ip = nil
+
+      for host_ip in 1..127
+        candidate_ip = UnixUser.get_ip_addr(@user.uid.to_i, host_ip)
+
+        # Skip the IP if it's already assigned to an endpoint
+        next if allocated_ips.include?(candidate_ip)
+
+        open_ip = candidate_ip
+        break
+      end
+
+      open_ip
+    end
+
+    # Returns true if the given IP and port are currently bound
+    # according to lsof, otherwise false.
+    def address_bound?(ip, port)
+      _, _, rc = Utils.oo_spawn("/usr/sbin/lsof -i @#{ip}:#{port}", timeout: @hourglass.remaining)
+      rc == 0
+    end
+
+    def addresses_bound?(addresses)
+      command = "/usr/sbin/lsof"
+      addresses.each do |addr|
+        command << " -i @#{addr[:ip]}:#{addr[:port]}"
+      end
+
+      _, _, rc = Utils.oo_spawn(command, timeout: @hourglass.remaining)
+      rc == 0
+    end
+
+    # Returns an array containing all currently allocated endpoint private
+    # IP addresses assigned to carts within the current gear, or an empty
+    # array if none are currently defined.
+    def get_allocated_private_ips
+      env = Utils::Environ::for_gear(@user.homedir)
+
+      allocated_ips = []
+
+      # Collect all existing endpoint IP allocations
+      process_cartridges do |cart_path|
+        cart_dir = File.basename(cart_path)
+        cart     = get_cartridge_from_directory(cart_dir)
+
+        cart.endpoints.each do |endpoint|
+          # TODO: If the private IP variable exists but the value isn't in
+          # the environment, what should happen?
+          ip = env[endpoint.private_ip_name]
+          allocated_ips << ip unless ip == nil
+        end
+      end
+
+      allocated_ips
+    end
+
+    # ----- Frontend methods -----
+
+    #
+    # Connect a cartridge to the frontend proxy
+    #
+    def connect_frontend(cartridge)
+      frontend       = OpenShift::FrontendHttpServer.new(@user.uuid, @user.container_name, @user.namespace)
+      gear_env       = Utils::Environ.for_gear(@user.homedir)
+      web_proxy_cart = web_proxy
+
+      begin
+        # TODO: exception handling
+        cartridge.endpoints.each do |endpoint|
+          endpoint.mappings.each do |mapping|
+            private_ip  = gear_env[endpoint.private_ip_name]
+            backend_uri = "#{private_ip}:#{endpoint.private_port}#{mapping.backend}"
+            options     = mapping.options ||= {}
+
+            if endpoint.websocket_port
+              options["websocket_port"] = endpoint.websocket_port
+            end
+
+            # Make sure that the mapping does not collide with the default web_proxy mapping
+            if mapping.frontend == "" and not cartridge.web_proxy? and web_proxy_cart
+              logger.info("Skipping default mapping as web proxy owns it for the application")
+              next
+            end
+
+            # Only web proxy cartridges can override the default mapping
+            if mapping.frontend == "" && (!cartridge.web_proxy?) && (cartridge.name != primary_cartridge.name)
+              logger.info("Skipping default mapping as primary cartridge owns it for the application")
+              next
+            end
+
+            logger.info("Connecting frontend mapping for #{@user.uuid}/#{cartridge.name}: "\
+                      "[#{mapping.frontend}] => [#{backend_uri}] with options: #{mapping.options}")
+            frontend.connect(mapping.frontend, backend_uri, options)
+          end
+        end
+      rescue Exception => e
+        logger.warn("V2CartModel#connect_frontend: #{e.message}\n#{e.backtrace.join("\n")}")
+        raise
+      end
+    end    
+
+    #
+    # Disconnect a cartridge from the frontend proxy
+    #
+    # This is only called when a cartridge is removed from a cartridge not a gear delete
+    def disconnect_frontend(cartridge)
+      mappings = []
+      cartridge.endpoints.each do |endpoint|
+        endpoint.mappings.each do |mapping|
+          mappings << mapping.frontend
+        end
+      end
+
+      logger.info("Disconnecting frontend mapping for #{@user.uuid}/#{cartridge.name}: #{mappings.inspect}")
+      unless mappings.empty?
+        OpenShift::FrontendHttpServer.new(@user.uuid, @user.container_name, @user.namespace).disconnect(*mappings)
+      end
+    end
+
     #
     # Unsubscribe from a cart
+    #
+    # Let a cart perform some action when another cart is being removed
+    # Today, it is used to cleanup environment variables
+    #
     #
     # @param cart_name   unsubscribing cartridge name
     # @param cart_name   publishing cartridge name
     def unsubscribe(cart_name, pub_cart_name)
-      @cartridge_model.unsubscribe(cart_name, pub_cart_name)
+      env_dir_path = File.join(@user.homedir, '.env', short_name_from_full_cart_name(pub_cart_name))
+      FileUtils.rm_rf(env_dir_path)
     end
 
     # create gear
