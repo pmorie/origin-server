@@ -70,6 +70,8 @@ module OpenShift
       @uuid
     end
 
+    # ----- Cartridge accessors and iterators -----
+
     #
     # Yields a +Cartridge+ instance for each cartridge in the gear.
     #
@@ -623,41 +625,6 @@ module OpenShift
       teardown_output
     end
 
-    #  cartridge_action(cartridge, action, software_version, render_erbs) -> buffer
-    #
-    #  Returns the results from calling a cartridge's action script.
-    #  Includes <code>--version</code> if provided.
-    #  Raises exception if script fails
-    #
-    #   stdout = cartridge_action(cartridge_obj)
-    def cartridge_action(cartridge, action, software_version, render_erbs=false)
-      logger.info "Running #{action} for #{@user.uuid}/#{cartridge.directory}"
-
-      cartridge_home = File.join(@user.homedir, cartridge.directory)
-      action         = File.join(cartridge_home, 'bin', action)
-      return "" unless File.exists? action
-
-      gear_env           = Utils::Environ.for_gear(@user.homedir)
-      cartridge_env_home = File.join(cartridge_home, 'env')
-
-      cartridge_env = gear_env.merge(Utils::Environ.load(cartridge_env_home))
-      if render_erbs
-        erbs = Dir.glob(cartridge_env_home + '/*.erb', File::FNM_DOTMATCH).select { |f| File.file?(f) }
-        render_erbs(cartridge_env, erbs)
-        cartridge_env = gear_env.merge(Utils::Environ.load(cartridge_env_home))
-      end
-
-      action << " --version #{software_version}"
-      out, _, _ = Utils.oo_spawn(action,
-                                 env:                 cartridge_env,
-                                 unsetenv_others:     true,
-                                 chdir:               cartridge_home,
-                                 uid:                 @user.uid,
-                                 timeout:             @hourglass.remaining,
-                                 expected_exitstatus: 0)
-      logger.info("Ran #{action} for #{@user.uuid}/#{cartridge.directory}\n#{out}")
-      out
-    end
 
     # ----- Endpoint methods -----
     # Expose an endpoint for a cartridge through the port proxy.
@@ -882,6 +849,110 @@ module OpenShift
       end
     end
 
+    # ---- Connector methods -----
+
+    # :call-seq:
+    #    V2CartridgeModel.new(...).connector_execute(cartridge_name, connection_type, connector, args) => String
+    #
+    def connector_execute(cart_name, pub_cart_name, connection_type, connector, args)
+      raise ArgumentError.new('cart_name cannot be nil') unless cart_name
+
+      cartridge    = get_cartridge(cart_name)
+      env          = Utils::Environ.for_gear(@user.homedir, File.join(@user.homedir, cartridge.directory))
+      env_var_hook = connection_type.start_with?("ENV:") && pub_cart_name
+
+      # Special treatment for env var connection hooks
+      if env_var_hook
+        set_connection_hook_env_vars(cart_name, pub_cart_name, args)
+        args = convert_to_shell_arguments(args)
+      end
+
+      conn = Runtime::PubSubConnector.new connection_type, connector
+
+      if conn.reserved?
+        begin
+          return send(conn.action_name)
+        rescue NoMethodError => e
+          logger.debug "#{e.message}; falling back to script"
+        end
+      end
+
+      cartridge_home = PathUtils.join(@user.homedir, cartridge.directory)
+      script = PathUtils.join(cartridge_home, 'hooks', conn.name)
+
+      unless File.executable?(script)
+        if env_var_hook
+          return "Set environment variables successfully"
+        else
+          msg = "ERROR: action '#{connector}' not found."
+          raise Utils::ShellExecutionException.new(msg, 127, msg)
+        end
+      end
+
+      command      = script << " " << args
+      out, err, rc = Utils.oo_spawn(command,
+                                    env:             env,
+                                    unsetenv_others: true,
+                                    chdir:           cartridge_home,
+                                    timeout:         @hourglass.remaining,
+                                    uid:             @user.uid)
+      if 0 == rc
+        logger.info("(#{rc})\n------\n#{Runtime::Utils.sanitize_credentials(out)}\n------)")
+        return out
+      end
+
+      logger.info("ERROR: (#{rc})\n------\n#{Runtime::Utils.sanitize_credentials(out)}\n------)")
+      raise OpenShift::Utils::ShellExecutionException.new(
+                "Control action '#{connector}' returned an error. rc=#{rc}\n#{out}", rc, out, err)
+    end
+
+    #
+    # Support for ENV hooks in the platform
+    #
+    def set_connection_hook_env_vars(cart_name, pub_cart_name, args)
+      logger.info("Setting env vars for #{cart_name} from #{pub_cart_name}")
+      logger.info("ARGS: #{args.inspect}")
+
+      env_dir_path = File.join(@user.homedir, '.env', short_name_from_full_cart_name(pub_cart_name))
+      FileUtils.mkpath(env_dir_path)
+
+      envs = {}
+
+      # Skip the first three arguments and jump to gear => "k1=v1\nk2=v2\n" hash map
+      pairs = args[3].values[0].split("\n")
+
+      pairs.each do |pair|
+        k, v    = pair.strip.split("=")
+        envs[k] = v
+      end
+
+      write_environment_variables(env_dir_path, envs, false)
+    end
+
+    #
+    # Get the cartridge short name from the full cart name as passed by the broker
+    #
+    def short_name_from_full_cart_name(pub_cart_name)
+      raise ArgumentError.new('pub_cart_name cannot be nil') unless pub_cart_name
+
+      return pub_cart_name if pub_cart_name.index('-').nil?
+
+      tokens = pub_cart_name.split('-')
+      tokens.pop
+      tokens.join('-')
+    end
+
+    # Convert env var hook arguments to shell arguments
+    # TODO: document expected form of args
+    def convert_to_shell_arguments(args)
+      new_args = []
+      args[3].each do |k, v|
+        vstr = v.split("\n").map { |p| p + ";" }.join(' ')
+        new_args.push "'#{k}'='#{vstr}'"
+      end
+      (args[0, 2] << Shellwords::shellescape(new_args.join(' '))).join(' ')
+    end
+
     #
     # Unsubscribe from a cart
     #
@@ -896,6 +967,204 @@ module OpenShift
       FileUtils.rm_rf(env_dir_path)
     end
 
+    # ----- Control script and cartridge actions -----
+
+    #  cartridge_action(cartridge, action, software_version, render_erbs) -> buffer
+    #
+    #  Returns the results from calling a cartridge's action script.
+    #  Includes <code>--version</code> if provided.
+    #  Raises exception if script fails
+    #
+    #   stdout = cartridge_action(cartridge_obj)
+    def cartridge_action(cartridge, action, software_version, render_erbs=false)
+      logger.info "Running #{action} for #{@user.uuid}/#{cartridge.directory}"
+
+      cartridge_home = File.join(@user.homedir, cartridge.directory)
+      action         = File.join(cartridge_home, 'bin', action)
+      return "" unless File.exists? action
+
+      gear_env           = Utils::Environ.for_gear(@user.homedir)
+      cartridge_env_home = File.join(cartridge_home, 'env')
+
+      cartridge_env = gear_env.merge(Utils::Environ.load(cartridge_env_home))
+      if render_erbs
+        erbs = Dir.glob(cartridge_env_home + '/*.erb', File::FNM_DOTMATCH).select { |f| File.file?(f) }
+        render_erbs(cartridge_env, erbs)
+        cartridge_env = gear_env.merge(Utils::Environ.load(cartridge_env_home))
+      end
+
+      action << " --version #{software_version}"
+      out, _, _ = Utils.oo_spawn(action,
+                                 env:                 cartridge_env,
+                                 unsetenv_others:     true,
+                                 chdir:               cartridge_home,
+                                 uid:                 @user.uid,
+                                 timeout:             @hourglass.remaining,
+                                 expected_exitstatus: 0)
+      logger.info("Ran #{action} for #{@user.uuid}/#{cartridge.directory}\n#{out}")
+      out
+    end
+    # Run code block against each cartridge in gear
+    #
+    # @param  [block]  Code block to process cartridge
+    # @yields [String] cartridge directory for each cartridge in gear
+    def process_cartridges(cartridge_dir = nil) # : yields cartridge_path
+      if cartridge_dir
+        cart_dir = File.join(@user.homedir, cartridge_dir)
+        yield cart_dir if File.exist?(cart_dir)
+        return
+      end
+
+      Dir[PathUtils.join(@user.homedir, "*")].each do |cart_dir|
+        next if File.symlink?(cart_dir) || !File.exist?(PathUtils.join(cart_dir, "metadata", "manifest.yml"))
+        yield cart_dir
+      end if @user.homedir and File.exist?(@user.homedir)
+    end
+
+    def do_control(action, cartridge, options={})
+      case cartridge
+        when String
+          cartridge_dir = cartridge_directory(cartridge)
+        when OpenShift::Runtime::Manifest
+          cartridge_dir = cartridge.directory
+        else
+          raise "Unsupported cartridge argument type: #{cartridge.class}"
+      end
+
+      options[:cartridge_dir] = cartridge_dir
+
+      do_control_with_directory(action, options)
+    end
+
+    # :call-seq:
+    #   V2CartridgeModel.new(...).do_control_with_directory(action, options)  -> output
+    #   V2CartridgeModel.new(...).do_control_with_directory(action)           -> output
+    #
+    # Call action on cartridge +control+ script. Run all pre/post hooks if found.
+    #
+    # +options+: hash
+    #   :cartridge_dir => path             : Process all cartridges (if +nil+) or the provided cartridge
+    #   :pre_action_hooks_enabled => true  : Whether to process repo action hooks before +action+
+    #   :post_action_hooks_enabled => true : Whether to process repo action hooks after +action+
+    #   :prefix_action_hooks => true       : If +true+, action hook names are automatically prefixed with
+    #                                        'pre' and 'post' depending on their execution order.
+    #   :out                               : An +IO+ object to which control script STDOUT should be directed. If
+    #                                        +nil+ (the default), output is logged.
+    #   :err                               : An +IO+ object to which control script STDERR should be directed. If
+    #                                        +nil+ (the default), output is logged.
+    def do_control_with_directory(action, options={})
+      cartridge_dir             = options[:cartridge_dir]
+      pre_action_hooks_enabled  = options.has_key?(:pre_action_hooks_enabled) ? options[:pre_action_hooks_enabled] : true
+      post_action_hooks_enabled = options.has_key?(:post_action_hooks_enabled) ? options[:post_action_hooks_enabled] : true
+      prefix_action_hooks       = options.has_key?(:prefix_action_hooks) ? options[:prefix_action_hooks] : true
+
+      logger.debug { "#{@user.uuid} #{action} against '#{cartridge_dir}'" }
+      buffer       = ''
+      gear_env     = Utils::Environ.for_gear(@user.homedir)
+      action_hooks = File.join(@user.homedir, %w{app-root runtime repo .openshift action_hooks})
+
+      if pre_action_hooks_enabled
+        pre_action_hook = prefix_action_hooks ? "pre_#{action}" : action
+        hook_buffer     = do_action_hook(pre_action_hook, gear_env, options)
+        buffer << hook_buffer if hook_buffer.is_a?(String)
+      end
+
+      process_cartridges(cartridge_dir) { |path|
+        # Make sure this cartridge's env directory overrides that of other cartridge envs
+        cartridge_local_env = Utils::Environ.load(File.join(path, 'env'))
+
+        ident                            = cartridge_local_env.keys.grep(/^OPENSHIFT_.*_IDENT/)
+        _, software, software_version, _ = Runtime::Manifest.parse_ident(cartridge_local_env[ident.first])
+        hooks                            = cartridge_hooks(action_hooks, action, software, software_version)
+
+        cartridge_env = gear_env.merge(cartridge_local_env)
+        control = File.join(path, 'bin', 'control')
+
+        command = []
+        command << hooks[:pre] unless hooks[:pre].empty?
+        command << "#{control} #{action}" if File.executable? control
+        command << hooks[:post] unless hooks[:post].empty?
+
+        unless command.empty?
+          command = ['set -e'] | command 
+
+          out, err, rc = Utils.oo_spawn(command.join('; '),
+                                      env:             cartridge_env,
+                                      unsetenv_others: true,
+                                      chdir:           path,
+                                      uid:             @user.uid,
+                                      timeout:         @hourglass.remaining,
+                                      out:             options[:out],
+                                      err:             options[:err])
+
+          buffer << out if out.is_a?(String)
+          buffer << err if err.is_a?(String)
+
+          raise Utils::ShellExecutionException.new(
+                  "Failed to execute: 'control #{action}' for #{path}", rc, out, err
+                ) if rc != 0
+        end
+      }
+
+      if post_action_hooks_enabled
+        post_action_hook = prefix_action_hooks ? "post_#{action}" : action
+        hook_buffer      = do_action_hook(post_action_hook, gear_env, options)
+        buffer << hook_buffer if hook_buffer.is_a?(String)
+      end
+
+      buffer
+    end
+
+    ##
+    # Executes the named +action+ from the user repo +action_hooks+ directory and returns the
+    # stdout of the execution, or raises a +ShellExecutionException+ if the action returns a
+    # non-zero return code.
+    #
+    # All hyphens in the +action+ will be replaced with underscores.
+    def do_action_hook(action, env, options)
+      action = action.gsub(/-/, '_')
+
+      action_hooks_dir = File.join(@user.homedir, %w{app-root runtime repo .openshift action_hooks})
+      action_hook      = File.join(action_hooks_dir, action)
+      buffer           = ''
+
+      if File.executable?(action_hook)
+        out, err, rc = Utils.oo_spawn(action_hook,
+                                      env:             env,
+                                      unsetenv_others: true,
+                                      chdir:           @user.homedir,
+                                      uid:             @user.uid,
+                                      timeout:         @hourglass.remaining,
+                                      out:             options[:out],
+                                      err:             options[:err])
+        raise Utils::ShellExecutionException.new(
+                  "Failed to execute action hook '#{action}' for #{@user.uuid} application #{@user.app_name}",
+                  rc, out, err
+              ) if rc != 0
+      end
+
+      buffer << out if out.is_a?(String)
+      buffer << err if err.is_a?(String)
+
+      buffer
+    end
+
+    def cartridge_hooks(action_hooks, action, name, version)
+      hooks = {pre: [], post: []}
+
+      hooks.each_key do |key|
+        new_hook = PathUtils.join(action_hooks, "#{key}_#{action}_#{name}")
+        old_hook = PathUtils.join(action_hooks, "#{key}_#{action}_#{name}-#{version}")
+
+        hooks[key] << "source #{new_hook}" if File.exist? new_hook
+        hooks[key] << "source #{old_hook}" if File.exist? old_hook
+      end
+      hooks
+    end
+
+
+    # ----- Create/delete gear methods -----
+
     # create gear
     #
     # - model/unix_user.rb
@@ -908,22 +1177,7 @@ module OpenShift
       notify_observers(:after_container_create)
     end
 
-    # Destroy gear
     #
-    # - model/unix_user.rb
-    # context: root
-    # @param skip_hooks should destroy call the gear's hooks before destroying the gear
-    def destroy(skip_hooks=false)
-      notify_observers(:before_container_destroy)
-
-      # possible mismatch across cart model versions
-      output, errout, retcode = perform_destroy(skip_hooks)
-
-      notify_observers(:after_container_destroy)
-
-      return output, errout, retcode
-    end
-
     # destroy(skip_hooks = false) -> [buffer, '', 0]
     #
     # Remove all cartridges from a gear and delete the gear.  Accepts
@@ -931,10 +1185,14 @@ module OpenShift
     # require, which accepted a single argument.
     #
     # destroy() => ['', '', 0]
-    def perform_destroy(skip_hooks = false)  # NOTE: renamed while inlining v2 cart model
-      logger.info('V2 destroy')
+    # - model/unix_user.rb
+    # context: root
+    # @param skip_hooks should destroy call the gear's hooks before destroying the gear
+    def destroy(skip_hooks=false)
+      notify_observers(:before_container_destroy)
 
       buffer = ''
+
       unless skip_hooks
         each_cartridge do |cartridge|
           unlock_gear(cartridge, false) do |c|
@@ -952,10 +1210,11 @@ module OpenShift
 
       @user.destroy
 
+      notify_observers(:after_container_destroy)
+
       # FIXME: V1 contract is there a better way?
       [buffer, '', 0]
     end
-
 
     # Public: Sets the app state to "stopped" and causes an immediate forced
     # termination of all gear processes.
