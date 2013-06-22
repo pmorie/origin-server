@@ -18,7 +18,6 @@ require 'rubygems'
 require 'openshift-origin-node/model/frontend_proxy'
 require 'openshift-origin-node/model/frontend_httpd'
 require 'openshift-origin-node/model/unix_user'
-require 'openshift-origin-node/model/v2_cart_model'
 require 'openshift-origin-common/models/manifest'
 require 'openshift-origin-node/utils/shell_exec'
 require 'openshift-origin-node/utils/application_state'
@@ -191,7 +190,6 @@ module OpenShift
     #
     # Prepare the given cartridge for the cartridge author
     #
-    #   v2_cart_model.unlock_gear('php-5.3')
     def unlock_gear(cartridge, relock = true)
       begin
         do_unlock(locked_files(cartridge))
@@ -206,7 +204,6 @@ module OpenShift
     #
     # Take the given array of file system entries and prepare them for the cartridge author
     #
-    #   v2_cart_model.do_unlock_gear(entries)
     def do_unlock(entries)
       mcs_label = Utils::SELinux.get_mcs_label(@user.uid)
 
@@ -627,6 +624,83 @@ module OpenShift
 
 
     # ----- Endpoint methods -----
+
+    # Creates public endpoints for the given cart. Public proxy mappings are created via
+    # the FrontendProxyServer, and the resulting mapped ports are written to environment
+    # variables with names based on the cart manifest endpoint entries.
+    #
+    # Returns nil on success, or raises an exception if any errors occur: all errors here
+    # are considered fatal.
+    def create_public_endpoints(cart_name)
+      env  = Utils::Environ::for_gear(@user.homedir)
+      cart = @cartridge_model.get_cartridge(cart_name)
+
+      proxy = OpenShift::FrontendProxyServer.new
+
+      # TODO: better error handling
+      cart.public_endpoints.each do |endpoint|
+        # Load the private IP from the gear
+        private_ip = env[endpoint.private_ip_name]
+
+        if private_ip == nil
+          raise "Missing private IP #{endpoint.private_ip_name} for cart #{cart.name} in gear #{@uuid}, "\
+            "required to create public endpoint #{endpoint.public_port_name}"
+        end
+
+        # Attempt the actual proxy mapping assignment
+        public_port = proxy.add(@user.uid, private_ip, endpoint.private_port)
+
+        @user.add_env_var(endpoint.public_port_name, public_port)
+
+        logger.info("Created public endpoint for cart #{cart.name} in gear #{@uuid}: "\
+          "[#{endpoint.public_port_name}=#{public_port}]")
+      end
+    end
+
+    # Deletes all public endpoints for the given cart. Public port mappings are
+    # looked up and deleted using the FrontendProxyServer, and all corresponding
+    # environment variables are deleted from the gear.
+    #
+    # Returns nil on success. Failed public port delete operations are logged
+    # and skipped.
+    def delete_public_endpoints(cart_name)
+      env  = Utils::Environ::for_gear(@user.homedir)
+      cart = @cartridge_model.get_cartridge(cart_name)
+
+      proxy = OpenShift::FrontendProxyServer.new
+
+      public_ports     = []
+      public_port_vars = []
+
+      cart.public_endpoints.each do |endpoint|
+        # Load the private IP from the gear
+        private_ip = env[endpoint.private_ip_name]
+
+        public_port_vars << endpoint.public_port_name
+
+        public_port = proxy.find_mapped_proxy_port(@user.uid, private_ip, endpoint.private_port)
+
+        public_ports << public_port unless public_port == nil
+      end
+
+      begin
+        # Remove the proxy entries
+        rc = proxy.delete_all(public_ports, true)
+        logger.info("Deleted all public endpoints for cart #{cart.name} in gear #{@uuid}\n"\
+          "Endpoints: #{public_port_vars}\n"\
+          "Public ports: #{public_ports}")
+      rescue => e
+        logger.warn(%Q{Couldn't delete all public endpoints for cart #{cart.name} in gear #{@uuid}: #{e.message}
+          Endpoints: #{public_port_vars}
+          Public ports: #{public_ports}
+                    #{e.backtrace}
+                    })
+      end
+
+      # Clean up the environment variables
+      public_port_vars.each { |var| @user.remove_env_var(var) }
+    end
+
     # Expose an endpoint for a cartridge through the port proxy.
     #
     # Returns nil on success, or raises an exception if any errors occur: all errors
@@ -1216,91 +1290,312 @@ module OpenShift
       [buffer, '', 0]
     end
 
+    # ----- Gear start/stop methods -----
+
+    ##
+    # Starts up the gear by running the cartridge +start+ control action for each 
+    # cartridge in the gear.
+    #
+    # By default, all cartridges in the gear are started. The selection of cartridges
+    # to be started is configurable via +options+.
+    #
+    # +options+: hash
+    #   :primary_only   => [boolean]  : If +true+, only the primary cartridge will be started.
+    #                                   Mutually exclusive with +secondary_only+.
+    #   :secondary_only => [boolean]  : If +true+, all cartridges except the primary cartridge
+    #                                   will be started. Mutually exclusive with +primary_only+.
+    #   :user_initiated => [boolean]  : Indicates whether the operation was user initated.
+    #                                   Default is +true+.
+    #   :out                          : An +IO+ object to which control script STDOUT should be directed. If
+    #                                   +nil+ (the default), output is logged.
+    #   :err                          : An +IO+ object to which control script STDERR should be directed. If
+    #                                   +nil+ (the default), output is logged.
+    #
+    # Returns the combined output of all +start+ action executions as a +String+.
+    def start_gear(options={})
+      options[:user_initiated] = true if not options.has_key?(:user_initiated)
+
+      if options[:primary_only] && options[:secondary_only]
+        raise ArgumentError.new('The primary_only and secondary_only options are mutually exclusive options')
+      end
+
+      buffer = ''
+      each_cartridge do |cartridge|
+        next if options[:primary_only] and cartridge.name != primary_cartridge.name
+        next if options[:secondary_only] and cartridge.name == primary_cartridge.name
+
+        buffer << start_cartridge('start', cartridge, options)
+      end
+
+      buffer
+    end
+
+    ##
+    # Sets the application state to +STOPPED+ and stops the gear. Gear stop implementation
+    # is model specific, but +options+ is provided to the implementation.
+    def stop_gear(options={})
+      ptions[:user_initiated] = true if not options.has_key?(:user_initiated)
+
+      buffer = ''
+
+      each_cartridge do |cartridge|
+        buffer << stop_cartridge(cartridge, options)
+      end
+
+      unless buffer.empty?
+        buffer.chomp!
+        buffer << "\n"
+      end
+
+      buffer << stopped_status_attr
+      buffer
+    end
+
+    ##
+    # Shuts down the gear by running the cartridge +stop+ control action for each cartridge 
+    # in the gear.
+    #
+    # +options+: hash
+    #   :user_initiated => [boolean]  : Indicates whether the operation was user initated.
+    #                                   Default is +true+.
+    #   :out                          : An +IO+ object to which control script STDOUT should be directed. If
+    #                                   +nil+ (the default), output is logged.
+    #   :err                          : An +IO+ object to which control script STDERR should be directed. If
+    #                                   +nil+ (the default), output is logged.
+    #
+    # Returns the combined output of all +stop+ action executions as a +String+.
+    def stop_gear(options={})
+
+
+      buffer
+    end    
+
     # Public: Sets the app state to "stopped" and causes an immediate forced
     # termination of all gear processes.
     #
     # TODO: exception handling
     def force_stop
       @state.value = OpenShift::State::STOPPED
-      @cartridge_model.create_stop_lock
+      create_stop_lock
       UnixUser.kill_procs(@user.uid)
     end
 
-    # Creates public endpoints for the given cart. Public proxy mappings are created via
-    # the FrontendProxyServer, and the resulting mapped ports are written to environment
-    # variables with names based on the cart manifest endpoint entries.
+    ##
+    # Starts a cartridge.
     #
-    # Returns nil on success, or raises an exception if any errors occur: all errors here
-    # are considered fatal.
-    def create_public_endpoints(cart_name)
-      env  = Utils::Environ::for_gear(@user.homedir)
-      cart = @cartridge_model.get_cartridge(cart_name)
+    # Both application state and the stop lock are managed during the operation. If start
+    # of the primary cartridge is invoked and +user_initiated+ is true, the stop lock is
+    # created.
+    #
+    # +type+      : Type of start [start, restart, reload]
+    # +cartridge+ : A +Cartridge+ instance or +String+ name of a cartridge.
+    # +options+   : hash
+    #   :user_initiated => [boolean]  : Indicates whether the operation was user initated.
+    #                                   Default is +true+.
+    #   :hot_deploy => [boolean]      : If +true+ and if +cartridge+ is the primary cartridge in the gear, the
+    #                                   gear state will be set to +STARTED+ but the actual cartridge start operation
+    #                                   will be skipped. Non-primary cartridges will be skipped with no state change.
+    #                                   Default is +false+.
+    #   :out                          : An +IO+ object to which control script STDOUT should be directed. If
+    #                                   +nil+ (the default), output is logged.
+    #   :err                          : An +IO+ object to which control script STDERR should be directed. If
+    #                                   +nil+ (the default), output is logged.
+    #
+    # Returns the output of the operation as a +String+ or raises a +ShellExecutionException+
+    # if the cartridge script fails.
+    def start_cartridge(type, cartridge, options={})
+      options[:user_initiated] = true if not options.has_key?(:user_initiated)
+      options[:hot_deploy] = false if not options.has_key?(:hot_deploy)
 
-      proxy = OpenShift::FrontendProxyServer.new
+      cartridge = get_cartridge(cartridge) if cartridge.is_a?(String)
 
-      # TODO: better error handling
-      cart.public_endpoints.each do |endpoint|
-        # Load the private IP from the gear
-        private_ip = env[endpoint.private_ip_name]
+      if not options[:user_initiated] and stop_lock?
+        return "Not starting cartridge #{cartridge.name} because the application was explicitly stopped by the user"
+      end
 
-        if private_ip == nil
-          raise "Missing private IP #{endpoint.private_ip_name} for cart #{cart.name} in gear #{@uuid}, "\
-            "required to create public endpoint #{endpoint.public_port_name}"
+      if cartridge.name == primary_cartridge.name
+        FileUtils.rm_f(stop_lock) if options[:user_initiated]
+        @state.value = OpenShift::State::STARTED
+
+        # Unidle the application, preferring to use the privileged operation if possible
+        frontend = FrontendHttpServer.new(@user.uuid)
+        if Process.uid == @user.uid
+          frontend.unprivileged_unidle
+        else
+          frontend.unidle
+        end
+      end
+
+      if options[:hot_deploy]
+        output = "Not starting cartridge #{cartridge.name} because hot deploy is enabled"
+        options[:out].puts(output) if options[:out]
+        return output
+      end
+
+      do_control(type, cartridge, options)
+    end
+
+    ##
+    # Stops a cartridge.
+    #
+    # Both application state and the stop lock are managed during the operation. If stop
+    # of the primary cartridge is invoked and +user_initiated+ is true, the stop lock
+    # is removed.
+    #
+    # +cartridge+ : A +Cartridge+ instance or +String+ name of a cartridge.
+    # +options+   : hash
+    #   :user_initiated => [boolean]  : Indicates whether the operation was user initated.
+    #                                   Default is +true+.
+    #   :hot_deploy => [boolean]      : If +true+, the stop operation is skipped for all cartridge types,
+    #                                   the gear state is not modified, and the stop lock is never created.
+    #                                   Default is +false+. 
+    #   :out                          : An +IO+ object to which control script STDOUT should be directed. If
+    #                                   +nil+ (the default), output is logged.
+    #   :err                          : An +IO+ object to which control script STDERR should be directed. If
+    #                                   +nil+ (the default), output is logged.
+    #
+    # Returns the output of the operation as a +String+ or raises a +ShellExecutionException+
+    # if the cartridge script fails.
+    def stop_cartridge(cartridge, options={})
+      options[:user_initiated] = true if not options.has_key?(:user_initiated)
+      options[:hot_deploy] = false if not options.has_key?(:hot_deploy)
+
+      cartridge = get_cartridge(cartridge) if cartridge.is_a?(String)
+
+      if options[:hot_deploy]
+        output = "Not stopping cartridge #{cartridge.name} because hot deploy is enabled"
+        options[:out].puts(output) if options[:out]
+        return output
+      end
+
+      if not options[:user_initiated] and stop_lock?
+        return "Not stopping cartridge #{cartridge.name} because the application was explicitly stopped by the user\n"
+      end
+
+      if cartridge.name == primary_cartridge.name
+        create_stop_lock if options[:user_initiated]
+        @state.value = OpenShift::State::STOPPED
+      end
+
+      do_control('stop', cartridge, options)
+    end
+
+    ##
+    # Writes the +stop_lock+ file and changes its ownership to the gear user.
+    def create_stop_lock
+      unless stop_lock?
+        mcs_label = Utils::SELinux.get_mcs_label(@user.uid)
+        File.new(stop_lock, File::CREAT|File::TRUNC|File::WRONLY, 0644).close()
+        PathUtils.oo_chown(@user.uid, @user.gid, stop_lock)
+        Utils::SELinux.set_mcs_label(mcs_label, stop_lock)
+      end
+    end
+
+    # ---- Gear idle/unidle -----
+
+    #
+    # Idles the gear if there is no stop lock and state is not already +STOPPED+.
+    #
+    def idle_gear(options={})
+      if not stop_lock? and (state.value != State::STOPPED)
+        frontend = FrontendHttpServer.new(@uuid)
+        frontend.idle
+        begin
+          output = stop_gear
+        ensure
+          state.value = State::IDLE
+        end
+        output
+      end
+    end
+
+    #
+    # Unidles the gear.
+    #
+    def unidle_gear(options={})
+      output = ""
+      OpenShift::Utils::Cgroups::with_no_cpu_limits(@user.uuid) do
+        if stop_lock? and (state.value == State::IDLE)
+          state.value = State::STARTED
+          output      = start_gear
         end
 
-        # Attempt the actual proxy mapping assignment
-        public_port = proxy.add(@user.uid, private_ip, endpoint.private_port)
+        frontend = FrontendHttpServer.new(@uuid)
+        if frontend.idle?
+          frontend.unidle
+        end
+      end
+      output
+    end
 
-        @user.add_env_var(endpoint.public_port_name, public_port)
+    # ----- Status methods -----
 
-        logger.info("Created public endpoint for cart #{cart.name} in gear #{@uuid}: "\
-          "[#{endpoint.public_port_name}=#{public_port}]")
+    def status(cart_name)
+      buffer = ''
+      buffer << stopped_status_attr
+      quota_cmd = "/bin/sh #{File.join('/usr/libexec/openshift/lib', "quota_attrs.sh")} #{user.name}"
+      out,err,rc = shellCmd(quota_cmd)
+      raise "ERROR: Error fetching quota (#{rc}): #{quota_cmd.squeeze(" ")} stdout: #{out} stderr: #{err}" unless rc == 0
+      buffer << out
+      buffer << @cartridge_model.do_control("status", cart_name)
+      buffer
+    end
+
+    def stopped_status_attr
+      if state.value == State::STOPPED || stop_lock?
+        "ATTR: status=ALREADY_STOPPED\n"
+      elsif state.value == State::IDLE
+        "ATTR: status=ALREADY_IDLED\n"
+      else
+        ''
       end
     end
 
-    # Deletes all public endpoints for the given cart. Public port mappings are
-    # looked up and deleted using the FrontendProxyServer, and all corresponding
-    # environment variables are deleted from the gear.
+    # ---- SSH Key Generation -----
+
     #
-    # Returns nil on success. Failed public port delete operations are logged
-    # and skipped.
-    def delete_public_endpoints(cart_name)
-      env  = Utils::Environ::for_gear(@user.homedir)
-      cart = @cartridge_model.get_cartridge(cart_name)
+    # Generate an RSA ssh key
+    #
+    def generate_ssh_key(cartridge)
+      ssh_dir        = File.join(@user.homedir, '.openshift_ssh')
+      known_hosts    = File.join(ssh_dir, 'known_hosts')
+      ssh_config     = File.join(ssh_dir, 'config')
+      ssh_key        = File.join(ssh_dir, 'id_rsa')
+      ssh_public_key = ssh_key + '.pub'
 
-      proxy = OpenShift::FrontendProxyServer.new
+      FileUtils.mkdir_p(ssh_dir)
+      make_user_owned(ssh_dir)
 
-      public_ports     = []
-      public_port_vars = []
+      Utils::oo_spawn("/usr/bin/ssh-keygen -N '' -f #{ssh_key}",
+                      chdir:               @user.homedir,
+                      uid:                 @user.uid,
+                      gid:                 @user.gid,
+                      timeout:             @hourglass.remaining,
+                      expected_exitstatus: 0)
 
-      cart.public_endpoints.each do |endpoint|
-        # Load the private IP from the gear
-        private_ip = env[endpoint.private_ip_name]
+      FileUtils.touch(known_hosts)
+      FileUtils.touch(ssh_config)
 
-        public_port_vars << endpoint.public_port_name
+      make_user_owned(ssh_dir)
 
-        public_port = proxy.find_mapped_proxy_port(@user.uid, private_ip, endpoint.private_port)
+      FileUtils.chmod(0750, ssh_dir)
+      FileUtils.chmod(0600, [ssh_key, ssh_public_key])
+      FileUtils.chmod(0660, [known_hosts, ssh_config])
 
-        public_ports << public_port unless public_port == nil
-      end
+      @user.add_env_var('APP_SSH_KEY', ssh_key, true)
+      @user.add_env_var('APP_SSH_PUBLIC_KEY', ssh_public_key, true)
 
-      begin
-        # Remove the proxy entries
-        rc = proxy.delete_all(public_ports, true)
-        logger.info("Deleted all public endpoints for cart #{cart.name} in gear #{@uuid}\n"\
-          "Endpoints: #{public_port_vars}\n"\
-          "Public ports: #{public_ports}")
-      rescue => e
-        logger.warn(%Q{Couldn't delete all public endpoints for cart #{cart.name} in gear #{@uuid}: #{e.message}
-          Endpoints: #{public_port_vars}
-          Public ports: #{public_ports}
-                    #{e.backtrace}
-                    })
-      end
+      public_key_bytes = IO.read(ssh_public_key)
+      public_key_bytes.sub!(/^ssh-rsa /, '')
 
-      # Clean up the environment variables
-      public_port_vars.each { |var| @user.remove_env_var(var) }
+      output = "APP_SSH_KEY_ADD: #{cartridge.directory} #{public_key_bytes}\n"
+      # The BROKER_AUTH_KEY_ADD token does not use any arguments.  It tells the broker
+      # to enable this gear to make REST API calls on behalf of the user who owns this gear.
+      output << "BROKER_AUTH_KEY_ADD: \n"
+      output
     end
+
+    # ----- Tidy -----
 
     # Public: Cleans up the gear, providing any installed
     # cartridges with the opportunity to perform their own
@@ -1357,61 +1652,6 @@ module OpenShift
       logger.debug("Completed tidy for gear #{@uuid}")
     end
 
-    ##
-    # Sets the application state to +STOPPED+ and stops the gear. Gear stop implementation
-    # is model specific, but +options+ is provided to the implementation.
-    def stop_gear(options={})
-      buffer = @cartridge_model.stop_gear(options)
-      unless buffer.empty?
-        buffer.chomp!
-        buffer << "\n"
-      end
-      buffer << stopped_status_attr
-      buffer
-    end
-
-    ##
-    # Idles the gear if there is no stop lock and state is not already +STOPPED+.
-    #
-    def idle_gear(options={})
-      if not stop_lock? and (state.value != State::STOPPED)
-        frontend = FrontendHttpServer.new(@uuid)
-        frontend.idle
-        begin
-          output = stop_gear
-        ensure
-          state.value = State::IDLE
-        end
-        output
-      end
-    end
-
-    ##
-    # Unidles the gear.
-    #
-    def unidle_gear(options={})
-      output = ""
-      OpenShift::Utils::Cgroups::with_no_cpu_limits(@user.uuid) do
-        if stop_lock? and (state.value == State::IDLE)
-          state.value = State::STARTED
-          output      = start_gear
-        end
-
-        frontend = FrontendHttpServer.new(@uuid)
-        if frontend.idle?
-          frontend.unidle
-        end
-      end
-      output
-    end
-
-    ##
-    # Sets the application state to +STARTED+ and starts the gear. Gear state implementation
-    # is model specific, but +options+ is provided to the implementation.
-    def start_gear(options={})
-      @cartridge_model.start_gear(options)
-    end
-
     def gear_level_tidy_tmp(gear_tmp_dir)
       # Temp dir cleanup
       tidy_action do
@@ -1448,21 +1688,7 @@ module OpenShift
       end
     end
 
-    def connector_execute(cart_name, pub_cart_name, connector_type, connector, args)
-      @cartridge_model.connector_execute(cart_name, pub_cart_name, connector_type, connector, args)
-    end
-
-    def deploy_httpd_proxy(cart_name)
-      @cartridge_model.deploy_httpd_proxy(cart_name)
-    end
-
-    def remove_httpd_proxy(cart_name)
-      @cartridge_model.remove_httpd_proxy(cart_name)
-    end
-
-    def restart_httpd_proxy(cart_name)
-      @cartridge_model.restart_httpd_proxy(cart_name)
-    end
+    # ----- Code receive, build, and deploy methods -----
 
     #
     # Handles the pre-receive portion of the Git push lifecycle.
@@ -1512,17 +1738,17 @@ module OpenShift
       builder_cartridge = builder_cartridge
 
       if builder_cart
-        @cartridge_model.do_control('post-receive',
-                                    builder_cart,
-                                    out: options[:out],
-                                    err: options[:err])
+        do_control('post-receive',
+                   builder_cart,
+                   out: options[:out],
+                   err: options[:err])
       else
-        @cartridge_model.do_control('pre-repo-archive',
-                                    primary_cartridge,
-                                    out:                       options[:out],
-                                    err:                       options[:err],
-                                    pre_action_hooks_enabled:  false,
-                                    post_action_hooks_enabled: false)
+        do_control('pre-repo-archive',
+                   primary_cartridge,
+                   out:                       options[:out],
+                   err:                       options[:err],
+                   pre_action_hooks_enabled:  false,
+                   post_action_hooks_enabled: false)
 
         ApplicationRepository.new(@user).archive
 
@@ -1548,12 +1774,12 @@ module OpenShift
     #   :init : boolean; if true, post-install steps will be executed (default: false)
     # 
     def remote_deploy(options={})
-      @cartridge_model.do_control('update-configuration',
-                                  primary_cartridge,
-                                  pre_action_hooks_enabled:  false,
-                                  post_action_hooks_enabled: false,
-                                  out:                       options[:out],
-                                  err:                       options[:err])
+      do_control('update-configuration',
+                 primary_cartridge,
+                 pre_action_hooks_enabled:  false,
+                 post_action_hooks_enabled: false,
+                 out:                       options[:out],
+                 err:                       options[:err])
 
       deploy(options)
 
@@ -1563,10 +1789,10 @@ module OpenShift
         ident                = primary_cart_env.keys.grep(/^OPENSHIFT_.*_IDENT/)
         _, _, version, _     = Runtime::Manifest.parse_ident(primary_cart_env[ident.first])
 
-        @cartridge_model.post_install(primary_cartridge,
-                                      version,
-                                      out: options[:out],
-                                      err: options[:err])
+        post_install(primary_cartridge,
+                     version,
+                     out: options[:out],
+                     err: options[:err])
 
       end
     end
@@ -1588,26 +1814,26 @@ module OpenShift
 
       buffer = ''
 
-      buffer << @cartridge_model.do_control('update-configuration',
-                                            primary_cartridge,
-                                            pre_action_hooks_enabled:  false,
-                                            post_action_hooks_enabled: false,
-                                            out:                       options[:out],
-                                            err:                       options[:err])
+      buffer << do_control('update-configuration',
+                           primary_cartridge,
+                           pre_action_hooks_enabled:  false,
+                           post_action_hooks_enabled: false,
+                           out:                       options[:out],
+                           err:                       options[:err])
 
-      buffer << @cartridge_model.do_control('pre-build',
-                                            primary_cartridge,
-                                            pre_action_hooks_enabled: false,
-                                            prefix_action_hooks:      false,
-                                            out:                      options[:out],
-                                            err:                      options[:err])
+      buffer << do_control('pre-build',
+                           primary_cartridge,
+                           pre_action_hooks_enabled: false,
+                           prefix_action_hooks:      false,
+                           out:                      options[:out],
+                           err:                      options[:err])
 
-      buffer << @cartridge_model.do_control('build',
-                                            primary_cartridge,
-                                            pre_action_hooks_enabled: false,
-                                            prefix_action_hooks:      false,
-                                            out:                      options[:out],
-                                            err:                      options[:err])
+      buffer << do_control('build',
+                           primary_cartridge,
+                           pre_action_hooks_enabled: false,
+                           prefix_action_hooks:      false,
+                           out:                      options[:out],
+                           err:                      options[:err])
 
       buffer
     end
@@ -1643,20 +1869,20 @@ module OpenShift
 
       web_proxy_cart = web_proxy
       if web_proxy_cart
-        buffer << @cartridge_model.do_control('deploy',
-                                              web_proxy_cart,
-                                              pre_action_hooks_enabled: false,
-                                              prefix_action_hooks:      false,
-                                              out:                      options[:out],
-                                              err:                      options[:err])
+        buffer << do_control('deploy',
+                             web_proxy_cart,
+                             pre_action_hooks_enabled: false,
+                             prefix_action_hooks:      false,
+                             out:                      options[:out],
+                             err:                      options[:err])
       end
 
-      buffer << @cartridge_model.do_control('deploy',
-                                            primary_cartridge,
-                                            pre_action_hooks_enabled: false,
-                                            prefix_action_hooks:      false,
-                                            out:                      options[:out],
-                                            err:                      options[:err])
+      buffer << do_control('deploy',
+                           primary_cartridge,
+                           pre_action_hooks_enabled: false,
+                           prefix_action_hooks:      false,
+                           out:                      options[:out],
+                           err:                      options[:err])
 
       buffer << start_gear(primary_only:   true,
                            user_initiated: true,
@@ -1664,12 +1890,12 @@ module OpenShift
                            out:            options[:out],
                            err:            options[:err])
 
-      buffer << @cartridge_model.do_control('post-deploy',
-                                            primary_cartridge,
-                                            pre_action_hooks_enabled: false,
-                                            prefix_action_hooks:      false,
-                                            out:                      options[:out],
-                                            err:                      options[:err])
+      buffer << do_control('post-deploy',
+                           primary_cartridge,
+                           pre_action_hooks_enabled: false,
+                           prefix_action_hooks:      false,
+                           out:                      options[:out],
+                           err:                      options[:err])
 
       buffer
     end
@@ -1678,35 +1904,37 @@ module OpenShift
     # === Cartridge control methods
 
     def start(cart_name, options={})
-      @cartridge_model.start_cartridge('start', cart_name,
-                                       user_initiated: true,
-                                       out:            options[:out],
-                                       err:            options[:err])
+      start_cartridge('start', cart_name,
+                               user_initiated: true,
+                               out:            options[:out],
+                               err:            options[:err])
     end
 
     def stop(cart_name, options={})
-      @cartridge_model.stop_cartridge(cart_name,
-                                      user_initiated: true,
-                                      out:            options[:out],
-                                      err:            options[:err])
+      stop_cartridge(cart_name,
+                     user_initiated: true,
+                     out:            options[:out],
+                     err:            options[:err])
     end
 
     # restart gear as supported by cartridges
     def restart(cart_name, options={})
-      @cartridge_model.start_cartridge('restart', cart_name,
-                                       user_initiated: true,
-                                       out:            options[:out],
-                                       err:            options[:err])
+      start_cartridge('restart', cart_name,
+                                 user_initiated: true,
+                                 out:            options[:out],
+                                 err:            options[:err])
     end
 
     # reload gear as supported by cartridges
     def reload(cart_name)
       if State::STARTED == state.value
-        return @cartridge_model.do_control('reload', cart_name)
+        return do_control('reload', cart_name)
       else
-        return @cartridge_model.do_control('force-reload', cart_name)
+        return do_control('force-reload', cart_name)
       end
     end
+
+    # ----- Gear snapshot/restore -----
 
     ##
     # Creates a snapshot of a gear.
@@ -1731,12 +1959,12 @@ module OpenShift
       end
 
       each_cartridge do |cartridge|
-        @cartridge_model.do_control('pre-snapshot', 
-                                    cartridge,
-                                    err: $stderr,
-                                    pre_action_hooks_enabled: false,
-                                    post_action_hooks_enabled: false,
-                                    prefix_action_hooks:      false,)
+        do_control('pre-snapshot', 
+                   cartridge,
+                   err:                       $stderr,
+                   pre_action_hooks_enabled:  false,
+                   post_action_hooks_enabled: false,
+                   prefix_action_hooks:       false,)
       end
 
       exclusions = []
@@ -1748,11 +1976,11 @@ module OpenShift
       write_snapshot_archive(exclusions)
 
       each_cartridge do |cartridge|
-        @cartridge_model.do_control('post-snapshot', 
-                                    cartridge, 
-                                    err: $stderr,
-                                    pre_action_hooks_enabled: false,
-                                    post_action_hooks_enabled: false)
+        do_control('post-snapshot', 
+                   cartridge, 
+                   err:                       $stderr,
+                   pre_action_hooks_enabled:  false,
+                   post_action_hooks_enabled: false)
       end      
 
       start_gear
@@ -1887,11 +2115,11 @@ module OpenShift
       end
 
       each_cartridge do |cartridge|
-        @cartridge_model.do_control('pre-restore', 
-                                    cartridge,
-                                    pre_action_hooks_enabled: false,
-                                    post_action_hooks_enabled: false,
-                                    err: $stderr)
+        do_control('pre-restore', 
+                   cartridge,
+                   pre_action_hooks_enabled:  false,
+                   post_action_hooks_enabled: false,
+                   err:                       $stderr)
       end
 
       prepare_for_restore(restore_git_repo, gear_env)
@@ -1908,11 +2136,11 @@ module OpenShift
       end
 
       each_cartridge do |cartridge|
-        @cartridge_model.do_control('post-restore',
-                                     cartridge,
-                                     pre_action_hooks_enabled: false,
-                                     post_action_hooks_enabled: false,
-                                     err: $stderr)
+        do_control('post-restore',
+                   cartridge,
+                   pre_action_hooks_enabled:  false,
+                   post_action_hooks_enabled: false,
+                   err:                       $stderr)
       end
 
       if restore_git_repo
@@ -1994,38 +2222,14 @@ module OpenShift
       end
     end
 
-    def status(cart_name)
-      buffer = ''
-      buffer << stopped_status_attr
-      quota_cmd = "/bin/sh #{File.join('/usr/libexec/openshift/lib', "quota_attrs.sh")} #{user.name}"
-      out,err,rc = shellCmd(quota_cmd)
-      raise "ERROR: Error fetching quota (#{rc}): #{quota_cmd.squeeze(" ")} stdout: #{out} stderr: #{err}" unless rc == 0
-      buffer << out
-      buffer << @cartridge_model.do_control("status", cart_name)
-      buffer
-    end
-
-    def stopped_status_attr
-      if state.value == State::STOPPED || stop_lock?
-        "ATTR: status=ALREADY_STOPPED\n"
-      elsif state.value == State::IDLE
-        "ATTR: status=ALREADY_IDLED\n"
-      else
-        ''
-      end
-    end
-
     def threaddump(cart_name)
       unless State::STARTED == state.value
         return "CLIENT_ERROR: Application is #{state.value}, must be #{State::STARTED} to allow a thread dump"
       end
 
-      @cartridge_model.do_control('threaddump', cart_name)
+      do_control('threaddump', cart_name)
     end
 
-    def stop_lock?
-      @cartridge_model.stop_lock?
-    end
 
     #
     # Send a fire-and-forget request to the broker to report build analytics.
@@ -2072,6 +2276,15 @@ module OpenShift
       File.exists?(stop_lock)
     end
 
+    ##
+    # Change the ownership and SELinux context of the target
+    # to be owned as the user using the user's MCS labels
+    def make_user_owned(target)
+      mcs_label = Utils::SELinux.get_mcs_label(@user.uid)
+
+      PathUtils.oo_chown_R(@user.uid, @user.gid, target)
+      Utils::SELinux.set_mcs_label_R(mcs_label, target)
+    end
 
     #
     # Public: Return an ApplicationContainer object loaded from the container_uuid on the system
@@ -2112,6 +2325,40 @@ module OpenShift
           end
         end
       end
+    end
+
+    private
+    ## special methods that are handled especially by the platform
+    def publish_gear_endpoint
+      begin
+        # TODO:
+        # There is some concern about how well-behaved Facter is
+        # when it is require'd.
+        # Instead, we use oo_spawn here to avoid it altogether.
+        # For the long-term, then, figure out a way to reliably
+        # determine the IP address from Ruby.
+        out, err, status = Utils.oo_spawn('facter ipaddress',
+                                          env:                 cartridge_env,
+                                          unsetenv_others:     true,
+                                          chdir:               @user.homedir,
+                                          uid:                 @user.uid,
+                                          timeout:             @hourglass.remaining,
+                                          expected_exitstatus: 0)
+        private_ip       = out.chomp
+      rescue
+        require 'socket'
+        addrinfo     = Socket.getaddrinfo(Socket.gethostname, 80) # 80 is arbitrary
+        private_addr = addrinfo.select { |info|
+          info[3] !~ /^127/
+        }.first
+        private_ip   = private_addr[3]
+      end
+
+      env = Utils::Environ::for_gear(@user.homedir)
+
+      output = "#{env['OPENSHIFT_GEAR_UUID']}@#{private_ip}:#{primary_cartridge.name};#{env['OPENSHIFT_GEAR_DNS']}"
+      logger.debug output
+      output
     end
 
   end
