@@ -84,28 +84,32 @@ module OpenShift
           return "***acceptable_error_env_vars_not_found={\"gear_uuid\":\"#{uuid}\"}***\n", 0
         end
 
-        gear_upgrade_extension = config.get('GEAR_UPGRADE_EXTENSION')
+        exitcode = 0
+        progress = Utils::UpgradeProgress.new(uuid)
 
-        if gear_upgrade_extension && File.exists?(gear_upgrade_extension)
+        gear_upgrade_extension = config.get('GEAR_UPGRADE_EXTENSION')
+        gear_upgrade = nil
+        progress.log("Gear upgrade extension configured at: #{gear_upgrade_extension}")
+
+        if gear_upgrade_extension && File.exists?("#{gear_upgrade_extension}.rb")
           begin
+            progress.log('Loading upgrade extension')
             require gear_upgrade_extension
-            gear_upgrade = OpenShift::GearUpgradeExtension.new(uuid)
-          rescue NameError => e
+            gear_upgrade = OpenShift::GearUpgradeExtension.new(uuid, gear_home)
+            progress.log("Gear upgrade extension loaded from #{gear_upgrade_extension}")
+          rescue => e
             return "Unable to instantiate gear upgrade extension", 127
           end
         end
-
-        exitcode = 0
-        progress = Utils::UpgradeProgress.new(uuid)
 
         begin
           progress.log "Beginning #{version} upgrade for #{uuid}"
           progress.init_store
 
           inspect_gear_state(progress, uuid, gear_home)
-          pre_cartridge_gear_upgrade(progress)
+          pre_cartridge_gear_upgrade(progress, gear_upgrade)
           upgrade_cartridges(progress, ignore_cartridge_version, gear_home, gear_env, uuid, hostname)
-          post_cartridge_gear_upgrade(progress)
+          post_cartridge_gear_upgrade(progress, gear_upgrade)
 
           if progress.has_instruction?('validate_gear')
             validate_gear(progress, uuid, gear_home)
@@ -132,16 +136,16 @@ module OpenShift
       end
 
       def self.pre_cartridge_gear_upgrade(progress, gear_upgrade)
-        if gear_upgrade && gear_upgrade.respond_to?(:pre_upgrade) && progress.incomplete?('pre__upgrade')
+        if !gear_upgrade.nil? && gear_upgrade.respond_to?(:pre_upgrade) && progress.incomplete?('pre_upgrade')
           gear_upgrade.pre_upgrade(progress)
           progress.mark_complete('pre_upgrade')
         end
       end
 
       def self.post_cartridge_gear_upgrade(progress, gear_upgrade)
-        if if gear_upgrade && gear_upgrade.respond_to?(:post_upgrade) && progress.incomplete?('post_upgrade') 
+        if !gear_upgrade.nil? && gear_upgrade.respond_to?(:post_upgrade) && progress.incomplete?('post_upgrade') 
           gear_upgrade.post_upgrade(progress) 
-          progress.mark_complete('post_cartridge_gear_upgrade')
+          progress.mark_complete('post_upgrade')
         end
       end
 
