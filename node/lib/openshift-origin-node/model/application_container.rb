@@ -46,6 +46,24 @@ module OpenShift
     class UserDeletionException < Exception
     end
 
+    class FileLockError < Exception
+      attr_reader :filename
+
+      def initialize(msg = nil, filename)
+        super(msg)
+        @filename = filename
+      end
+    end
+
+    class FileUnlockError < Exception
+      attr_reader :filename
+
+      def initialize(msg = nil, filename)
+        super(msg)
+        @filename = filename
+      end
+    end
+
     # == Application Container
     class ApplicationContainer
       include ActiveModel::Observing
@@ -62,7 +80,7 @@ module OpenShift
 
       attr_reader :uuid, :application_uuid, :state, :container_name, :application_name, :namespace, :container_dir,
                   :quota_blocks, :quota_files, :base_dir, :gecos, :skel_dir, :supplementary_groups,
-                  :cartridge_model, :container_plugin, :hourglass
+                  :container_plugin, :hourglass
       attr_accessor :uid, :gid
 
       containerization_plugin_gem = ::OpenShift::Config.new.get('CONTAINERIZATION_PLUGIN') 
@@ -94,6 +112,8 @@ module OpenShift
         @skel_dir         = @config.get("GEAR_SKEL_DIR") || DEFAULT_SKEL_DIR
         @supplementary_groups = @config.get("GEAR_SUPPLEMENTARY_GROUPS")
         @hourglass        = hourglass || ::OpenShift::Runtime::Utils::Hourglass.new(3600)
+        @timeout          = 30
+        @cartridges       = {}
 
         begin
           user_info         = Etc.getpwnam(@uuid)
@@ -110,8 +130,7 @@ module OpenShift
           @container_plugin = nil
         end
 
-        @state           = ::OpenShift::Runtime::Utils::ApplicationState.new(self)
-        @cartridge_model = V2CartridgeModel.new(@config, self, @state, @hourglass)
+        @state = ::OpenShift::Runtime::Utils::ApplicationState.new(self)
       end
 
       #
@@ -175,6 +194,13 @@ module OpenShift
         notify_observers(:after_container_create)
       end
 
+      # destroy(skip_hooks = false) -> [buffer, '', 0]
+      #
+      # Remove all cartridges from a gear and delete the gear.  Accepts
+      # and discards any parameters to comply with the signature of V1
+      # require, which accepted a single argument.
+      #
+      # destroy() => ['', '', 0]
       # Destroy gear
       #
       # - model/unix_user.rb
@@ -200,14 +226,33 @@ module OpenShift
           lock.fcntl(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC)
           lock.flock(File::LOCK_EX)
 
-          @cartridge_model.each_cartridge do |cart|
+          each_cartridge do |cart|
             env = ::OpenShift::Runtime::Utils::Environ::for_gear(@container_dir)
             cart.public_endpoints.each do |endpoint|
               notify_endpoint_delete << "NOTIFY_ENDPOINT_DELETE: #{endpoint.public_port_name} #{@config.get('PUBLIC_IP')} #{env[endpoint.public_port_name]}\n"
             end
           end
-          # possible mismatch across cart model versions
-          output, errout, retcode = @cartridge_model.destroy(skip_hooks)
+
+          begin
+            unless skip_hooks
+              each_cartridge do |cartridge|
+                unlock_gear(cartridge, false) do |c|
+                  begin
+                    buffer << cartridge_teardown(c.directory, false)
+                  rescue ::OpenShift::Runtime::Utils::ShellExecutionException => e
+                    logger.warn("Cartridge teardown operation failed on gear #{@container.uuid} for cartridge #{c.directory}: #{e.message} (rc=#{e.rc})")
+                  end
+                end
+              end
+            end
+          rescue Exception => e
+            logger.warn("Cartridge teardown operation failed on gear #{@container.uuid} for some cartridge: #{e.message}")
+            output << "CLIENT_ERROR: Abandoned cartridge teardowns. There may be extraneous data left on system."
+          end
+
+          # Ensure we're not in the gear's directory
+          Dir.chdir(@config.get("GEAR_BASE_DIR"))
+          retcode = 0
 
           raise UserDeletionException.new("ERROR: unable to destroy user account #{@uuid}") if @uuid.nil?
 
@@ -239,7 +284,7 @@ module OpenShift
       # TODO: exception handling
       def force_stop
         @state.value = State::STOPPED
-        @cartridge_model.create_stop_lock
+        create_stop_lock
         @container_plugin.stop
       end
 
@@ -302,7 +347,14 @@ module OpenShift
           gear_level_tidy_tmp(gear_tmp_dir)
 
           # Delegate to cartridge model to perform cart-level tidy operations for all installed carts.
-          @cartridge_model.tidy
+          each_cartridge do |cartridge|
+            begin
+              output = do_control('tidy', cartridge)
+            rescue ::OpenShift::Runtime::Utils::ShellExecutionException => e
+              logger.warn("Tidy operation failed for cartridge #{cartridge.name} on "\
+                          "gear #{uuid}: #{e.message} (rc=#{e.rc}), output=#{output}")
+            end
+          end
 
           # git gc - do this last to maximize room  for git to write changes
           gear_level_tidy_git(gear_repo_dir)
@@ -351,21 +403,73 @@ module OpenShift
       end
 
       ##
-      # Sets the application state to +STARTED+ and starts the gear. Gear state implementation
-      # is model specific, but +options+ is provided to the implementation.
+      # Starts up the gear by running the cartridge +start+ control action for each
+      # cartridge in the gear.
+      #
+      # By default, all cartridges in the gear are started. The selection of cartridges
+      # to be started is configurable via +options+.
+      #
+      # +options+: hash
+      #   :primary_only   => [boolean]  : If +true+, only the primary cartridge will be started.
+      #                                   Mutually exclusive with +secondary_only+.
+      #   :secondary_only => [boolean]  : If +true+, all cartridges except the primary cartridge
+      #                                   will be started. Mutually exclusive with +primary_only+.
+      #   :user_initiated => [boolean]  : Indicates whether the operation was user initated.
+      #                                   Default is +true+.
+      #   :out                          : An +IO+ object to which control script STDOUT should be directed. If
+      #                                   +nil+ (the default), output is logged.
+      #   :err                          : An +IO+ object to which control script STDERR should be directed. If
+      #                                   +nil+ (the default), output is logged.
+      #
+      # Returns the combined output of all +start+ action executions as a +String+.
       def start_gear(options={})
-        @cartridge_model.start_gear(options)
+        options[:user_initiated] = true if not options.has_key?(:user_initiated)
+
+        if options[:primary_only] && options[:secondary_only]
+          raise ArgumentError.new('The primary_only and secondary_only options are mutually exclusive options')
+        end
+
+        buffer = ''
+        each_cartridge do |cartridge|
+          next if options[:primary_only] and cartridge.name != primary_cartridge.name
+          next if options[:secondary_only] and cartridge.name == primary_cartridge.name
+
+          buffer << start_cartridge('start', cartridge, options)
+        end
+
+        buffer
       end
 
+      ##
+      # Shuts down the gear by running the cartridge +stop+ control action for each cartridge
+      # in the gear.
+      #
+      # +options+: hash
+      #   :user_initiated => [boolean]  : Indicates whether the operation was user initated.
+      #                                   Default is +true+.
+      #   :out                          : An +IO+ object to which control script STDOUT should be directed. If
+      #                                   +nil+ (the default), output is logged.
+      #   :err                          : An +IO+ object to which control script STDERR should be directed. If
+      #                                   +nil+ (the default), output is logged.
+      #
+      # Returns the combined output of all +stop+ action executions as a +String+.
       ##
       # Sets the application state to +STOPPED+ and stops the gear. Gear stop implementation
       # is model specific, but +options+ is provided to the implementation.
       def stop_gear(options={})
-        buffer = @cartridge_model.stop_gear(options)
+        options[:user_initiated] = true if not options.has_key?(:user_initiated)
+
+        buffer = ''
+
+        each_cartridge do |cartridge|
+          buffer << stop_cartridge(cartridge, options)
+        end
+
         unless buffer.empty?
           buffer.chomp!
           buffer << "\n"
         end
+
         buffer << stopped_status_attr
         buffer
       end
@@ -474,12 +578,248 @@ module OpenShift
         end
       end
 
-      def get_cartridge(cart_name)
-        @cartridge_model.get_cartridge(cart_name)
+      def empty_repository?
+        ApplicationRepository.new(self).empty?
+      end
+
+      def stop_lock
+        PathUtils.join(@container.container_dir, 'app-root', 'runtime', '.stop_lock')
       end
 
       def stop_lock?
-        @cartridge_model.stop_lock?
+        File.exists?(stop_lock)
+      end
+
+      ##
+      # Writes the +stop_lock+ file and changes its ownership to the gear user.
+      def create_stop_lock
+        unless stop_lock?
+          mcs_label = ::OpenShift::Runtime::Utils::SELinux.get_mcs_label(uid)
+          File.new(stop_lock, File::CREAT|File::TRUNC|File::WRONLY, 0644).close()
+          set_rw_permission(stop_lock)
+        end
+      end
+
+      ##
+      # Yields a +Cartridge+ instance for each cartridge in the gear.
+      #
+      def each_cartridge
+        process_cartridges do |cartridge_dir|
+          cartridge = get_cartridge_from_directory(File.basename(cartridge_dir))
+          yield cartridge
+        end
+      end
+
+      ##
+      # Returns the primary +Cartridge+ in the gear as specified by the
+      # +OPENSHIFT_PRIMARY_CARTRIDGE_DIR+ environment variable, or +Nil+ if
+      # no primary cartridge is present.
+      #
+      def primary_cartridge
+        env              = ::OpenShift::Runtime::Utils::Environ.for_gear(@container.container_dir)
+        primary_cart_dir = env['OPENSHIFT_PRIMARY_CARTRIDGE_DIR']
+
+        raise "No primary cartridge detected in gear #{@container.uuid}" unless primary_cart_dir
+
+        return get_cartridge_from_directory(File.basename(primary_cart_dir))
+      end
+
+      ##
+      # Returns the +Cartridge+ in the gear whose +web_proxy+ flag is set to
+      # true, nil otherwise
+      #
+      def web_proxy
+        each_cartridge do |cartridge|
+          return cartridge if cartridge.web_proxy?
+        end
+        nil
+      end
+
+      ##
+      # Detects and returns a builder +Cartridge+ in the gear if present, otherwise +nil+.
+      #
+      def builder_cartridge
+        builder_cart = nil
+        each_cartridge do |c|
+          if c.categories.include? 'ci_builder'
+            builder_cart = c
+            break
+          end
+        end
+        builder_cart
+      end
+
+      # FIXME: Once Broker/Node protocol updated to provided necessary information this hack must go away
+      def map_cartridge_name(cartridge_name)
+        results = cartridge_name.scan(/([a-zA-Z\d-]+)-([\d\.]+)/).first
+        raise "Invalid cartridge identifier '#{cartridge_name}': expected name-version" unless results && 2 == results.size
+        results
+      end
+
+      def cartridge_directory(cart_name)
+        name, _  = map_cartridge_name(cart_name)
+        cart_dir = Dir.glob(PathUtils.join(container_dir, "#{name}"))
+        raise "Ambiguous cartridge name #{cart_name}: found #{cart_dir}:#{cart_dir.size}" if 1 < cart_dir.size
+        raise "Cartridge directory not found for #{cart_name}" if  1 > cart_dir.size
+
+        File.basename(cart_dir.first)
+      end
+
+      # Load the cartridge's local manifest from the Broker token 'name-version'
+      def get_cartridge(cart_name)
+        unless @cartridges.has_key? cart_name
+          cart_dir = ''
+          begin
+            cart_dir = cartridge_directory(cart_name)
+
+            @cartridges[cart_name] = get_cartridge_from_directory(cart_dir)
+          rescue Exception => e
+            logger.error e.message
+            logger.error e.backtrace.join("\n")
+            raise "Failed to get cartridge '#{cart_name}' from #{cart_dir} in gear #{@container.uuid}: #{e.message}"
+          end
+        end
+
+        @cartridges[cart_name]
+      end
+
+      # Load cartridge's local manifest from cartridge directory name
+      def get_cartridge_from_directory(directory)
+        raise "Directory name is required" if (directory == nil || directory.empty?)
+
+        unless @cartridges.has_key? directory
+          cartridge_path = PathUtils.join(container_dir, directory)
+          manifest_path  = PathUtils.join(cartridge_path, 'metadata', 'manifest.yml')
+          ident_path     = Dir.glob(PathUtils.join(cartridge_path, 'env', "OPENSHIFT_*_IDENT")).first
+
+          raise "Cartridge manifest not found: #{manifest_path} missing" unless File.exists?(manifest_path)
+          raise "Cartridge Ident not found: #{ident_path} missing" unless File.exists?(ident_path)
+
+          _, _, version, _ = Runtime::Manifest.parse_ident(IO.read(ident_path))
+
+          @cartridges[directory] = Manifest.new(manifest_path, version, container_dir)
+        end
+        @cartridges[directory]
+      end
+
+      # Load the cartridge's local manifest from the Broker token 'name-version'
+      def get_cartridge_fallback(cart_name)
+        directory = cartridge_directory(cart_name)
+        _, version  = map_cartridge_name(cart_name)
+
+        raise "Directory name is required" if (directory == nil || directory.empty?)
+
+        cartridge_path = PathUtils.join(container_dir, directory)
+        manifest_path  = PathUtils.join(cartridge_path, 'metadata', 'manifest.yml')
+
+        raise "Cartridge manifest not found: #{manifest_path} missing" unless File.exists?(manifest_path)
+
+        Manifest.new(manifest_path, version, container_dir)
+      end
+
+      # Finds the next IP address available for binding of the given port for
+      # the current gear user. The IP is assumed to be available only if the IP is
+      # not already associated with an existing endpoint defined by any cartridge within the gear.
+      #
+      # Returns a string IP address in dotted-quad notation if one is available
+      # for the given port, or returns nil if IP is available.
+      def find_open_ip(port)
+        allocated_ips = get_allocated_private_ips
+        logger.debug("IPs already allocated for #{port} in gear #{uuid}: #{allocated_ips}")
+
+        open_ip = nil
+
+        for host_ip in 1..127
+          candidate_ip = @container.get_ip_addr(host_ip)
+
+          # Skip the IP if it's already assigned to an endpoint
+          next if allocated_ips.include?(candidate_ip)
+
+          open_ip = candidate_ip
+          break
+        end
+
+        open_ip
+      end
+
+      # Returns true if the given IP and port are currently bound
+      # according to lsof, otherwise false.
+      def address_bound?(ip, port)
+        _, _, rc = run_in_container_context("/usr/sbin/lsof -i @#{ip}:#{port}", timeout: @hourglass.remaining)
+        rc == 0
+      end
+
+      def addresses_bound?(addresses)
+        command = "/usr/sbin/lsof"
+        addresses.each do |addr|
+          command << " -i @#{addr[:ip]}:#{addr[:port]}"
+        end
+
+        _, _, rc = @container.run_in_container_context(command, timeout: @hourglass.remaining)
+        rc == 0
+      end
+
+      # Returns an array containing all currently allocated endpoint private
+      # IP addresses assigned to carts within the current gear, or an empty
+      # array if none are currently defined.
+      def get_allocated_private_ips
+        env = ::OpenShift::Runtime::Utils::Environ::for_gear(container_dir)
+
+        allocated_ips = []
+
+        # Collect all existing endpoint IP allocations
+        process_cartridges do |cart_path|
+          cart_dir = File.basename(cart_path)
+          cart     = get_cartridge_from_directory(cart_dir)
+
+          cart.endpoints.each do |endpoint|
+            # TODO: If the private IP variable exists but the value isn't in
+            # the environment, what should happen?
+            ip = env[endpoint.private_ip_name]
+            allocated_ips << ip unless ip == nil
+          end
+        end
+
+        allocated_ips
+      end
+
+      ##
+      # Generate an RSA ssh key
+      def generate_ssh_key(cartridge)
+        ssh_dir        = PathUtils.join(@container.container_dir, '.openshift_ssh')
+        known_hosts    = PathUtils.join(ssh_dir, 'known_hosts')
+        ssh_config     = PathUtils.join(ssh_dir, 'config')
+        ssh_key        = PathUtils.join(ssh_dir, 'id_rsa')
+        ssh_public_key = ssh_key + '.pub'
+
+        FileUtils.mkdir_p(ssh_dir)
+        set_rw_permission(ssh_dir)
+
+        run_in_container_context("/usr/bin/ssh-keygen -N '' -f #{ssh_key}",
+                                 chdir:               @container.container_dir,
+                                 timeout:             @hourglass.remaining,
+                                 expected_exitstatus: 0)
+
+        FileUtils.touch(known_hosts)
+        FileUtils.touch(ssh_config)
+
+        set_rw_permission_R(ssh_dir)
+
+        FileUtils.chmod(0750, ssh_dir)
+        FileUtils.chmod(0600, [ssh_key, ssh_public_key])
+        FileUtils.chmod(0660, [known_hosts, ssh_config])
+
+        add_env_var('APP_SSH_KEY', ssh_key, true)
+        add_env_var('APP_SSH_PUBLIC_KEY', ssh_public_key, true)
+
+        public_key_bytes = IO.read(ssh_public_key)
+        public_key_bytes.sub!(/^ssh-rsa /, '')
+
+        output = "APP_SSH_KEY_ADD: #{cartridge.directory} #{public_key_bytes}\n"
+        # The BROKER_AUTH_KEY_ADD token does not use any arguments.  It tells the broker
+        # to enable this gear to make REST API calls on behalf of the user who owns this gear.
+        output << "BROKER_AUTH_KEY_ADD: \n"
+        output
       end
 
       #
@@ -517,10 +857,6 @@ module OpenShift
         end
 
         Process.detach(pid)
-      end
-
-      def list_proxy_mappings
-        @cartridge_model.list_proxy_mappings
       end
 
       #
@@ -617,6 +953,38 @@ module OpenShift
 
       def set_rw_permission(paths)
         @container_plugin.set_rw_permission(paths)
+      end
+
+      private
+      ## special methods that are handled especially by the platform
+      def publish_gear_endpoint
+        begin
+          # TODO:
+          # There is some concern about how well-behaved Facter is
+          # when it is require'd.
+          # Instead, we use run_in_container_context here to avoid it altogether.
+          # For the long-term, then, figure out a way to reliably
+          # determine the IP address from Ruby.
+          out, err, status = @container.run_in_container_context('facter ipaddress',
+              env:                 cartridge_env,
+              chdir:               @container.container_dir,
+              timeout:             @hourglass.remaining,
+              expected_exitstatus: 0)
+          private_ip       = out.chomp
+        rescue
+          require 'socket'
+          addrinfo     = Socket.getaddrinfo(Socket.gethostname, 80) # 80 is arbitrary
+          private_addr = addrinfo.select { |info|
+            info[3] !~ /^127/
+          }.first
+          private_ip   = private_addr[3]
+        end
+
+        env = ::OpenShift::Runtime::Utils::Environ::for_gear(@container.container_dir)
+
+        output = "#{env['OPENSHIFT_GEAR_UUID']}@#{private_ip}:#{primary_cartridge.name};#{env['OPENSHIFT_GEAR_DNS']}"
+        logger.debug output
+        output
       end
     end
   end
