@@ -25,9 +25,22 @@ module OpenShift
   ;
 end
 
+module OpenShift
+  module Runtime
+    class ApplicationContainer
+      def self.shim
+
+      end
+    end
+  end
+end
+
 class ApplicationContainerTest < OpenShift::NodeTestCase
+  GEAR_BASE_DIR = '/var/lib/openshift'
 
   def setup
+    ::OpenShift::Runtime::ApplicationContainer.shim
+
     @ports_begin    = 35531
     @ports_per_user = 5
     @uid_begin      = 500
@@ -43,7 +56,6 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
     raise "Couldn't find cart base path at #{cart_base_path}" unless File.exists?(cart_base_path)
 
     @config.stubs(:get).with("CARTRIDGE_BASE_PATH").returns(cart_base_path)
-    #@config.stubs(:get).with("CONTAINERIZATION_PLUGIN").returns('openshift-origin-container-selinux')
 
     # Set up the container
     @gear_uuid = "5502"
@@ -61,6 +73,9 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
         container_dir: "/var/lib/openshift/#{@gear_uuid}"
       )
     )
+
+    @container_plugin = mock()
+    OpenShift::Runtime::Containerization::Plugin.stubs(:new).with(anything()).returns(@container_plugin)
 
     @container = OpenShift::Runtime::ApplicationContainer.new(@gear_uuid, @gear_uuid, @user_uid,
         @app_name, @gear_uuid, @namespace, nil, nil, nil)
@@ -132,7 +147,7 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
     manifest = "/tmp/manifest-#{Process.pid}"
     IO.write(manifest, @mock_manifest, 0)
     @mock_cartridge = OpenShift::Runtime::Manifest.new(manifest)
-    @container.cartridge_model.stubs(:get_cartridge).with("mock").returns(@mock_cartridge)
+    @container.stubs(:get_cartridge).with("mock").returns(@mock_cartridge)
   end
 
   def test_public_endpoints_create
@@ -162,7 +177,7 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
 
     proxy = mock('OpenShift::Runtime::FrontendProxyServer')
     OpenShift::Runtime::FrontendProxyServer.stubs(:new).returns(proxy)
-    OpenShift::Runtime::V2CartridgeModel.any_instance.expects(:list_proxy_mappings).returns([
+    @container.expects(:list_proxy_mappings).returns([
         {public_port_name: "Endpoint_1", proxy_port:       @ports_begin},
         {public_port_name: "Endpoint_2", proxy_port:       @ports_begin+1},
         {public_port_name: "Endpoint_3", proxy_port:       @ports_begin+2},
@@ -186,7 +201,8 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
 
     @container.stubs(:stop_gear)
     @container.stubs(:gear_level_tidy_tmp).with('/foo/.tmp')
-    @container.cartridge_model.expects(:tidy)
+    @container.expects(:each_cartridge).yields(@mock_cartridge)
+    @container.expects(:do_control).with('tidy', @mock_cartridge)
     @container.stubs(:gear_level_tidy_git).with('/foo/git/app_name.git')
     @container.stubs(:start_gear)
 
@@ -201,7 +217,8 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
 
     @container.stubs(:stop_gear).raises(Exception.new)
     @container.stubs(:gear_level_tidy_tmp).with('/foo/.tmp')
-    @container.cartridge_model.expects(:tidy).never
+    @container.expects(:each_cartridge).never
+    @container.expects(:do_control).never
     @container.stubs(:gear_level_tidy_git).with('/foo/git/app_name.git')
     @container.stubs(:start_gear).never
 
@@ -225,7 +242,8 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
     FileUtils.mkpath("/tmp/#@user_uid/app-root/runtime")
     OpenShift::Runtime::Containerization::Plugin.stubs(:kill_procs).with(@user_uid).returns(nil)
     @container.state.expects(:value=).with(OpenShift::Runtime::State::STOPPED)
-    @container.cartridge_model.expects(:create_stop_lock)
+    @container.expects(:create_stop_lock)
+    @container_plugin.expects(:stop)
     @container.force_stop
   end
 
@@ -236,7 +254,7 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
     connector = 'set-db-connection-info'
     args = 'foo'
 
-    @container.cartridge_model.expects(:connector_execute).with(cart_name, pub_cart_name, connector_type, connector, args)
+    @container.expects(:connector_execute).with(cart_name, pub_cart_name, connector_type, connector, args)
 
     @container.connector_execute(cart_name, pub_cart_name, connector_type, connector, args)
   end
@@ -245,6 +263,8 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
   #
   # TODO: Is there a way to do this algorithmically?
   def test_get_ip_addr_success
+    ::OpenShift::Runtime::Containerization::Plugin.unstub(:new)
+
     scenarios = [
         [501, 1, "127.0.250.129"],
         [501, 10, "127.0.250.138"],
@@ -269,5 +289,202 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
 
       assert_equal container.get_ip_addr(s[1]), s[2]
     end
+  end
+
+  def test_get_cartridge_error_loading
+    @container.unstub(:get_cartridge)
+
+    hourglass = mock()
+    hourglass.stubs(:remaining).returns(3600)
+
+    YAML.stubs(:load_file).with("#{@homedir}/redhat-crtest/metadata/manifest.yml").raises(ArgumentError.new('bla'))
+
+    assert_raise(RuntimeError, "Failed to load cart manifest from #{@homedir}/redhat-crtest/metadata/manifest.yml for cart mock in gear : bla") do
+      @container.get_cartridge("mock-0.1")
+    end
+  end
+
+  def test_private_endpoint_create
+    ip1 = "127.0.250.1"
+    ip2 = "127.0.250.2"
+
+    @container.expects(:find_open_ip).with(8080).returns(ip1)
+    @container.expects(:find_open_ip).with(9090).returns(ip2)
+
+    @container.expects(:addresses_bound?).returns(false)
+
+    @container.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP1", ip1)
+    @container.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT1", 8080)
+    @container.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT2", 8081)
+    @container.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT3", 8082)
+    @container.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP2", ip2)
+    @container.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT4", 9090)
+    @container.expects(:add_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT5", 9091)
+
+    @container.create_private_endpoints(@mock_cartridge)
+  end
+
+  def test_private_endpoint_create_empty_endpoints
+    @container.expects(:add_env_var).never
+    @container.expects(:find_open_ip).never
+    @container.expects(:address_bound?).never
+    @container.expects(:addresses_bound?).never
+
+    cart = mock()
+    cart.stubs(:directory).returns("/nowhere")
+    cart.stubs(:endpoints).returns([])
+
+    @container.create_private_endpoints(cart)
+  end
+
+  def test_private_endpoint_create_binding_failure
+    ip1 = "127.0.250.1"
+    ip2 = "127.0.250.2"
+
+    @container.expects(:find_open_ip).with(8080).returns(ip1)
+    @container.expects(:find_open_ip).with(9090).returns(ip2)
+
+    @container.expects(:add_env_var).times(7)
+
+    @container.expects(:addresses_bound?).returns(true)
+    @container.expects(:address_bound?).returns(true).times(5)
+
+    assert_raise(RuntimeError) do
+      @container.create_private_endpoints(@mock_cartridge)
+    end
+  end
+
+  def test_private_endpoint_delete
+    @container.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP1")
+    @container.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT1")
+    @container.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP1")
+    @container.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT2")
+    @container.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP1")
+    @container.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT3")
+    @container.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP2")
+    @container.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT4")
+    @container.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_IP2")
+    @container.expects(:remove_env_var).with("OPENSHIFT_MOCK_EXAMPLE_PORT5")
+
+    @container.delete_private_endpoints(@mock_cartridge)
+  end
+
+  # Verifies that an IP can be allocated for a simple port binding request
+  # where no other IPs are allocated to any carts in a gear.
+  def test_find_open_ip_success
+    ::OpenShift::Runtime::Containerization::Plugin.unstub(:new)
+    @container = OpenShift::Runtime::ApplicationContainer.new(@gear_uuid, @gear_uuid, @user_uid,
+        @app_name, @gear_uuid, @namespace, nil, nil, nil)
+
+    @container.expects(:get_allocated_private_ips).returns([])
+
+    assert_equal "127.10.190.129", @container.find_open_ip(8080)
+  end
+
+  # Ensures that a previously allocated IP within the gear won't be recycled
+  # when a new allocation request is made.
+  def test_find_open_ip_already_allocated
+    @container.expects(:get_allocated_private_ips).returns(["127.10.190.129"])
+
+    assert_equal "127.10.190.130", @container.find_open_ip(8080)
+  end
+
+  # Verifies that nil is returned from find_open_ip when all possible IPs
+  # are already allocated to other endpoints.
+  def test_find_open_ip_all_previously_allocated
+    # Stub out a mock allocated IP array which will always tell the caller
+    # that their input is included in the array. This simulates the case where
+    # any IP the caller wants appears to be already allocated by other endpoints.
+    allocated_array = mock()
+    allocated_array.expects(:include?).returns(true).at_least_once
+
+    @container.expects(:get_allocated_private_ips).returns(allocated_array)
+
+    assert_nil @container.find_open_ip(8080)
+  end
+
+  # Flow control for destroy success - cartridge_teardown called for each method
+  # and unix user destroyed.
+  def test_destroy_success
+    @container.expects(:notify_observers).with(:before_container_destroy)
+
+    mock_lock = mock()
+
+    File.expects(:open).with("/var/lock/oo-create.#{@gear_uuid}", File::RDWR|File::CREAT|File::TRUNC, 0o0600).yields(mock_lock)
+    mock_lock.expects(:fcntl).with(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC)
+    mock_lock.expects(:flock).with(File::LOCK_EX)
+
+    @container.expects(:each_cartridge).yields(@mock_cartridge)
+    @container.expects(:unlock_gear).with(@mock_cartridge, false).yields(@mock_cartridge)
+    @container.expects(:cartridge_teardown).with('mock', false).returns("")
+
+    Dir.stubs(:chdir).with('/tmp').yields
+
+    @container_plugin.expects(:destroy)
+
+    @config.expects(:get).with('CREATE_APP_SYMLINKS').returns(nil)
+    mock_lock.expects(:flock).with(File::LOCK_UN)
+
+    @container.expects(:notify_observers).with(:after_container_destroy)
+
+    @container.destroy
+  end
+
+  # Flow control for destroy without running hooks
+  # Verifies that none of the teardown hooks are called but the user is destroyed
+  def test_destroy_skip_hooks
+    @container.expects(:notify_observers).with(:before_container_destroy)
+
+    mock_lock = mock()
+
+    File.expects(:open).with("/var/lock/oo-create.#{@gear_uuid}", File::RDWR|File::CREAT|File::TRUNC, 0o0600).yields(mock_lock)
+    mock_lock.expects(:fcntl).with(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC)
+    mock_lock.expects(:flock).with(File::LOCK_EX)
+
+    @container.expects(:each_cartridge).yields(@mock_cartridge).once
+    @container.expects(:unlock_gear).never
+    @container.expects(:cartridge_teardown).never
+
+    Dir.stubs(:chdir).with('/tmp').yields
+
+    @container_plugin.expects(:destroy)
+
+    @config.expects(:get).with('CREATE_APP_SYMLINKS').returns(nil)
+    mock_lock.expects(:flock).with(File::LOCK_UN)
+
+    @container.expects(:notify_observers).with(:after_container_destroy)
+
+    @container.destroy(true)
+  end  
+
+  # Flow control for destroy when teardown raises an error.
+  # Verifies that all teardown hooks are called, even if one raises an error,
+  # and that unix user is still destroyed.
+  def test_destroy_teardown_raises
+    @container.expects(:notify_observers).with(:before_container_destroy)
+
+    mock_lock = mock()
+
+    File.expects(:open).with("/var/lock/oo-create.#{@gear_uuid}", File::RDWR|File::CREAT|File::TRUNC, 0o0600).yields(mock_lock)
+    mock_lock.expects(:fcntl).with(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC)
+    mock_lock.expects(:flock).with(File::LOCK_EX)
+
+    @container.expects(:each_cartridge).yields(@mock_cartridge)
+    @container.expects(:unlock_gear).with(@mock_cartridge, false).yields(@mock_cartridge)
+    @container.expects(:cartridge_teardown).with('mock', false).returns("")
+    @container.expects(:cartridge_teardown).with(@mock_cartridge.directory, false).raises(::OpenShift::Runtime::Utils::ShellExecutionException.new('error'))
+
+    Dir.stubs(:chdir).with('/tmp').yields
+
+    @container_plugin.expects(:destroy)
+
+    @config.expects(:get).with('CREATE_APP_SYMLINKS').returns(nil)
+    mock_lock.expects(:flock).with(File::LOCK_UN)
+
+    @container.expects(:notify_observers).with(:after_container_destroy)
+
+    @container.destroy
+
+    @container.destroy
   end
 end

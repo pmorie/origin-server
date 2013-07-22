@@ -226,28 +226,27 @@ module OpenShift
           lock.fcntl(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC)
           lock.flock(File::LOCK_EX)
 
+          env = ::OpenShift::Runtime::Utils::Environ::for_gear(@container_dir)
+
           each_cartridge do |cart|
-            env = ::OpenShift::Runtime::Utils::Environ::for_gear(@container_dir)
             cart.public_endpoints.each do |endpoint|
               notify_endpoint_delete << "NOTIFY_ENDPOINT_DELETE: #{endpoint.public_port_name} #{@config.get('PUBLIC_IP')} #{env[endpoint.public_port_name]}\n"
             end
-          end
 
-          begin
-            unless skip_hooks
-              each_cartridge do |cartridge|
-                unlock_gear(cartridge, false) do |c|
+            begin
+              unless skip_hooks
+                unlock_gear(cart, false) do |c|
                   begin
                     buffer << cartridge_teardown(c.directory, false)
                   rescue ::OpenShift::Runtime::Utils::ShellExecutionException => e
-                    logger.warn("Cartridge teardown operation failed on gear #{@container.uuid} for cartridge #{c.directory}: #{e.message} (rc=#{e.rc})")
+                    logger.warn("Cartridge teardown operation failed on gear #{uuid} for cartridge #{c.directory}: #{e.message} (rc=#{e.rc})")
                   end
                 end
               end
+            rescue Exception => e
+              logger.warn("Cartridge teardown operation failed on gear #{uuid} for some cartridge: #{e.message}")
+              output << "CLIENT_ERROR: Abandoned cartridge teardowns. There may be extraneous data left on system."
             end
-          rescue Exception => e
-            logger.warn("Cartridge teardown operation failed on gear #{@container.uuid} for some cartridge: #{e.message}")
-            output << "CLIENT_ERROR: Abandoned cartridge teardowns. There may be extraneous data left on system."
           end
 
           # Ensure we're not in the gear's directory
@@ -676,7 +675,7 @@ module OpenShift
           rescue Exception => e
             logger.error e.message
             logger.error e.backtrace.join("\n")
-            raise "Failed to get cartridge '#{cart_name}' from #{cart_dir} in gear #{@container.uuid}: #{e.message}"
+            raise "Failed to get cartridge '#{cart_name}' from #{cart_dir} in gear #{uuid}: #{e.message}"
           end
         end
 
@@ -730,7 +729,7 @@ module OpenShift
         open_ip = nil
 
         for host_ip in 1..127
-          candidate_ip = @container.get_ip_addr(host_ip)
+          candidate_ip = get_ip_addr(host_ip)
 
           # Skip the IP if it's already assigned to an endpoint
           next if allocated_ips.include?(candidate_ip)
