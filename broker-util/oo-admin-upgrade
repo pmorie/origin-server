@@ -78,7 +78,12 @@ def upgrade(args={})
   # mode run (for continue and reruns, we'll be working from existing
   # itineraries at the gear level)
   write_node_itineraries = (mode == :normal)
-  itinerary = build_node_itinerary(write_node_itineraries)
+  itinerary = build_node_itinerary(target_server_identity: target_server_identity,
+                                   upgrade_position: upgrade_position,
+                                   num_upgraders: num_upgraders,
+                                   write_node_itineraries: write_node_itineraries,
+                                   version: version,
+                                   ignore_cartridge_version: ignore_cartridge_version)
 
   upgrader_position_nodes = itinerary[:upgrader_position_nodes]
   login_cnt = itinerary[:login_count]
@@ -156,7 +161,14 @@ end
 #
 # Returns an itinerary hash containing node-level metadata for the upgrade (not including
 # the actual gear details). The nodes are sorted by the number of active gears they contain.
-def build_node_itinerary(write_node_itineraries = true)
+def build_node_itinerary(opts)
+  target_server_identity = opts[:target_server_identity]
+  upgrade_position = opts[:upgrade_position]
+  num_upgraders = opts[:num_upgraders]
+  write_node_itineraries = opts[:write_node_itineraries]
+  version = opts[:version]
+  ignore_cartridge_version = opts[:ignore_cartridge_version]
+
   itinerary = {
     node_queue: [],
     logins_count: 0,
@@ -312,7 +324,7 @@ end
 #   }
 def write_node_itinerary(node, gears)
   itinerary_file = upgrade_itinerary_path(node[:server_identity])
-  puts "Writing #{gearts.length} gears for node #{node[:server_identity]} to file #{itinerary_file}"
+  puts "Writing #{geart.length} gears for node #{node[:server_identity]} to file #{itinerary_file}"
   
   gears.each do |gear|
     data = {
