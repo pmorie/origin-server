@@ -23,6 +23,11 @@ def clean_cart_repo
       $logger.info("Erasing test-generated version #{cart}-0.1 (0.0.2)")
       cart_repo.erase(cart, '0.1', '0.0.2')
 
+      if cart_repo.exist?(cart, '0.0.2', '0.2')
+        $logger.info("Erasing test-generated version #{cart}-0.2 (0.0.2)")
+        cart_repo.erase(cart, '0.2', '0.0.2')
+      end
+
       if File.exist?(manifest_backup_path)
         $logger.info("Restoring #{cart} #{manifest_path}")
         FileUtils.copy(manifest_backup_path, manifest_path)
