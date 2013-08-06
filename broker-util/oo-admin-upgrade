@@ -6,6 +6,13 @@ require 'getoptlong'
 require 'stringio'
 require 'set'
 require 'json'
+
+$:.unshift('/var/www/openshift/broker')
+require 'config/environment'
+# Disable analytics for admin scripts
+Rails.configuration.analytics[:enabled] = false
+Rails.configuration.msg_broker[:rpc_options][:disctimeout] = 20
+
 require 'commander/import'
 
 name="#{__FILE__}"
@@ -324,7 +331,7 @@ end
 #   }
 def write_node_itinerary(node, gears)
   itinerary_file = upgrade_itinerary_path(node[:server_identity])
-  puts "Writing #{gear.length} gears for node #{node[:server_identity]} to file #{itinerary_file}"
+  puts "Writing #{gears.length} gears for node #{node[:server_identity]} to file #{itinerary_file}"
   
   gears.each do |gear|
     data = {
@@ -636,14 +643,7 @@ def execute_script(cmd, num_tries=1, timeout=28800)
   return output, exitcode
 end
 
-
 def do_command(command, options)
-  $:.unshift('/var/www/openshift/broker')
-  require 'config/environment'
-  # Disable analytics for admin scripts
-  Rails.configuration.analytics[:enabled] = false
-  Rails.configuration.msg_broker[:rpc_options][:disctimeout] = 20
-
   begin
     yield
   rescue => e
