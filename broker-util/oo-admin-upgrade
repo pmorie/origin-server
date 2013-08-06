@@ -632,7 +632,13 @@ def do_command(command, options)
   Rails.configuration.analytics[:enabled] = false
   Rails.configuration.msg_broker[:rpc_options][:disctimeout] = 20
 
-  yield
+  begin
+    yield
+  rescue => e
+    puts e.message
+    puts e.backtrace.join("\n")
+    raise
+  end
 end
 
 command :upgrade_gear do |c|
