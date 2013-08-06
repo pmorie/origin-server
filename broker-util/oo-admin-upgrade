@@ -324,7 +324,7 @@ end
 #   }
 def write_node_itinerary(node, gears)
   itinerary_file = upgrade_itinerary_path(node[:server_identity])
-  puts "Writing #{geart.length} gears for node #{node[:server_identity]} to file #{itinerary_file}"
+  puts "Writing #{gear.length} gears for node #{node[:server_identity]} to file #{itinerary_file}"
   
   gears.each do |gear|
     data = {
