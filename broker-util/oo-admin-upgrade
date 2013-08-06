@@ -187,7 +187,7 @@ def build_node_itinerary(write_node_itineraries = true)
   ret = []
   user_map = {}
   OpenShift::DataStore.find(:cloud_users, {}, {:fields => ["_id", "uuid", "login"], :timeout => false}) do |hash|
-    itinerary[:logins_cnt] += 1
+    itinerary[:logins_count] += 1
     user_uuid = hash['uuid']
     user_login = hash['login']
     user_map[hash['_id'].to_s] = [user_uuid, user_login]
