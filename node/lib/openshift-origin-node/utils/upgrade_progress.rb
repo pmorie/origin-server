@@ -6,7 +6,7 @@ module OpenShift
   module Runtime
     module Utils
       class UpgradeProgress
-        attr_reader :gear_home, :gear_base_dir, :uuid, :steps
+        attr_reader :gear_home, :gear_base_dir, :uuid, :steps, :buffer
 
         def initialize(gear_base_dir, gear_home, uuid)
           @gear_base_dir = gear_base_dir

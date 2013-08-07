@@ -186,7 +186,7 @@ module OpenShift
         end
 
         result[:steps] = progress.steps
-        result[:log] = progress.report
+        result[:log] = progress.buffer
 
         result
       end
@@ -481,7 +481,7 @@ module OpenShift
 
           progress.step "#{name}_setup" do |context, errors|
             setup_output = cart_model.cartridge_action(m, 'setup', version, true)
-            progress.log "Executed setup for #{name}", stdout: setup_output
+            progress.log "Executed setup for #{name}"
             context[:cartridge] = name.downcase
             context[:stdout] = setup_output
           end
@@ -529,7 +529,7 @@ module OpenShift
                                          uid: container.uid,
                                          gid: container.gid)
 
-          progress.log "Ran upgrade script for #{name}", rc: rc, stdout: out, stderr: err
+          progress.log "Ran upgrade script for #{name}"
 
           context[:cartridge] = name.downcase
           context[:rc] = rc
