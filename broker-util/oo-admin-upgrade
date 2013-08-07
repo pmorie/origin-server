@@ -581,7 +581,7 @@ class Upgrader
 
   ##
   # Appends +value+ to +filename+.
-  def self.append_to_file(filename, value)
+  def append_to_file(filename, value)
     file = File.open(filename, 'a')
     begin
       file.puts value
