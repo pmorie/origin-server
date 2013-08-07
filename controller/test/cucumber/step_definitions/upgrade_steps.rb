@@ -322,7 +322,7 @@ Then /^the invocation markers from the gear upgrade should exist$/ do
 end
 
 When /^the gears on the node are upgraded with oo-admin-upgrade( --rerun)?$/ do |rerun|
-  upgrade_cmd = "oo-admin-upgrade upgrade_node --target-version='expected'"
+  upgrade_cmd = "oo-admin-upgrade upgrade_node --version='expected'"
 
   if rerun
     upgrade_cmd = "oo-admin-upgrade upgrade-node --version='expected' --mode=rerun"
