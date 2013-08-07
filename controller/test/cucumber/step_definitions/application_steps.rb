@@ -41,6 +41,9 @@ Given /^a new client created( scalable)? (.+) application$/ do |scalable, type|
   end
   raise "Could not create domain: #{@app.create_domain_code}" unless @app.create_domain_code == 0
   raise "Could not create application #{@app.create_app_code}" unless @app.create_app_code == 0
+
+  @test_apps_hash ||= {}
+  @test_apps_hash[@app.name] = @app
 end
 
 Given /^a new client created( scalable)? (.+) application named (.+)$/ do |scalable, type, app_name|
