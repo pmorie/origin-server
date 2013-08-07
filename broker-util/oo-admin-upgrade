@@ -383,11 +383,11 @@ class Upgrader
     # archive anything we would otherwise discard
     cleanup_list.each do |output_file|
       if File.exists?(output_file)
-        FileUtils.touch output_file
-      else
         archive_file = "#{timestamp}_#{output_file}"
         puts "Archiving #{output_file} to #{archive_file}"
         FileUtils.mv output_file, archive_file
+      else
+        FileUtils.touch output_file
       end
     end
 
