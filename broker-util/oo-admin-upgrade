@@ -382,10 +382,13 @@ class Upgrader
 
     # archive anything we would otherwise discard
     cleanup_list.each do |output_file|
-      archive_file = "#{timestamp}_#{output_file}"
-      puts "Archiving #{output_file} to #{archive_file}"
-      FileUtils.mv output_file, archive_file
-      FileUtils.touch output_file
+      if File.exists?(output_file)
+        FileUtils.touch output_file
+      else
+        archive_file = "#{timestamp}_#{output_file}"
+        puts "Archiving #{output_file} to #{archive_file}"
+        FileUtils.mv output_file, archive_file
+      end
     end
 
     # fork the call to +upgrade_node_from_itinerary+ (TODO: revisit this later; the fork is apparently used
