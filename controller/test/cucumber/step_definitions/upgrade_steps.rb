@@ -127,11 +127,14 @@ next_software_version=$3
 
 if [ "$version" == "0.1" ]; then
   if [ -f $MOCK_STATE/upgrade_script_first_invocation ]; then
+    touch $MOCK_STATE/upgrade_invoked
     exit 0
   else
     touch $MOCK_STATE/upgrade_script_first_invocation
     exit 1
   fi
+else
+  touch $MOCK_STATE/upgrade_invoked
 fi
 
 exit 0
