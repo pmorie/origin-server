@@ -386,8 +386,6 @@ class Upgrader
         archive_file = "#{timestamp}_#{output_file}"
         puts "Archiving #{output_file} to #{archive_file}"
         FileUtils.mv output_file, archive_file
-      else
-        FileUtils.touch output_file
       end
     end
 
@@ -541,6 +539,10 @@ class Upgrader
           gear_result[:upgrade_result] = JSON.load(upgrade_result_json)
           gear_result[:exit_code] = exit_code
 
+          unless gear_result[:upgrade_result]['upgrade_complete']
+            gear_result[:errors] << "Gear upgrade result is marked incomplete"
+          end
+
           upgrade_on_node_time = (Time.now.to_f * 1000).to_i - upgrade_on_node_start_time
 
           gear_result[:timings]["time_upgrade_on_node_measured_from_broker"] = upgrade_on_node_time
@@ -586,6 +588,8 @@ class Upgrader
   ##
   # Appends +value+ to +filename+.
   def append_to_file(filename, value)
+    FileUtils.touch filename unless File.exists?(filename)
+
     file = File.open(filename, 'a')
     begin
       file.puts value
