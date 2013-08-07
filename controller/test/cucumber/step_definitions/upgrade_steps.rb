@@ -84,9 +84,7 @@ Given /^a rigged version of the ([^ ]+)\-([\d\.]+) cartridge$/ do |cart_name, co
   current_manifest = prepare_cart_for_rewrite(cart_name, component_version)
   create_rigged_upgrade_script(@upgrade_script_path)
 
-  rewrite_and_install(current_manifest, @manifest_path) do |manifest, current_version|
-    manifest['Version-Overrides']['0.2']['Compatible-Versions'] = [ current_version ]
-  end
+  rewrite_and_install(current_manifest, @manifest_path)
 end
 
 def prepare_cart_for_rewrite(cart_name, component_version)
@@ -125,11 +123,15 @@ version=$1
 current_software_version=$2
 next_software_version=$3
 
+echo "version: $version"
+
 if [ "$version" == "0.1" ]; then
   if [ -f $MOCK_STATE/upgrade_script_first_invocation ]; then
     touch $MOCK_STATE/upgrade_invoked
+    echo "success"
     exit 0
   else
+    echo "failing"
     touch $MOCK_STATE/upgrade_script_first_invocation
     exit 1
   fi
@@ -196,19 +198,23 @@ Then /^the ([^ ]+) cartridge version should be updated$/ do |cart_name|
   assert_cart_version_updated(cart_name, @app)
 end
 
-Then /^the ([^ ]+) cartridge version should be updated in (.+)$/ do |cart_name, app_name|
+Then /^the ([^ ]+) cartridge version should (not )?be updated in (.+)$/ do |cart_name, negate, app_name|
   app = @test_apps_hash[app_name]
-  assert_cart_version_updated(cart_name, app)
+  assert_cart_version_updated(cart_name, app, negate)
 end
 
-def assert_cart_version_updated(cart_name, app)
+def assert_cart_version_updated(cart_name, app, negate=false)
   new_version = IO.read(File.join($home_root, @app.uid, %W(app-root data #{cart_name}_test_version))).chomp
 
   ident_path                 = Dir.glob(File.join($home_root, app.uid, %W(#{cart_name} env OPENSHIFT_*_IDENT))).first
   ident                      = IO.read(ident_path)
   _, _, _, cartridge_version = OpenShift::Runtime::Manifest.parse_ident(ident)
 
-  assert_equal new_version, cartridge_version
+  if negate
+    assert_not_equal new_version, cartridge_version
+  else
+    assert_equal new_version, cartridge_version
+  end
 end
 
 When /^the ([^ ]+) invocation markers are cleared$/ do |cartridge_name|

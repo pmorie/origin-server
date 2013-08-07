@@ -34,19 +34,20 @@ Feature: Cartridge upgrades
 
   Scenario: Upgrade a node using --rerun to upgrade failed apps
     Given the expected version of the mock-0.1 cartridge is installed
-    And a rigged version of the mock-0.1 cartridge
     And a new client created mock-0.1 application named mock1
     And a new client created mock-0.2 application named mock2
     And the mock invocation markers are cleared in mock1
     And the mock invocation markers are cleared in mock2
-    And a gear level upgrade extension exists
+    And a rigged version of the mock-0.1 cartridge
 
     When the gears on the node are upgraded with oo-admin-upgrade
+    Then the mock cartridge version should be updated in mock2
     Then the upgrade metadata will be cleaned up in mock2
     And no unprocessed ERB templates should exist in mock2
-    And the invocation markers from a compatible upgrade should exist in mock2
+    And the invocation markers from a incompatible upgrade should exist in mock2
     And the mock2 application should be accessible
 
+    And the mock cartridge version should not be updated in mock1
     And unprocessed ERB templates should exist in mock1
     And the invocation markers from an incompatible upgrade should not exist in mock1
     And the mock1 application should not be accessible
