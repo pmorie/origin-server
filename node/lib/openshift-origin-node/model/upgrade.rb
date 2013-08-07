@@ -105,8 +105,9 @@ module OpenShift
           upgrade_complete: false,
           errors: [],
           warnings: [],
-          itinerary_entries: {},
-          times: {}
+          itinerary: {},
+          times: {},
+          log: nil
         }
 
         if !File.directory?(gear_home) || File.symlink?(gear_home)
@@ -143,7 +144,9 @@ module OpenShift
 
           inspect_gear_state
           gear_pre_upgrade
+          
           itinerary = compute_itinerary
+          result[:itinerary] = itinerary.entries
 
           restart_time = upgrade_cartridges(itinerary)
           result[:times][:restart] = restart_time
@@ -162,7 +165,7 @@ module OpenShift
 
           result[:upgrade_complete] = true
         rescue OpenShift::Runtime::Utils::ShellExecutionException => e
-          progress.log "Caught an exception during upgrade: #{e.message}", rc: e.rc, stdout: e.stdout, stderr: e.stderr
+          progress.log "Caught an exception during upgrade: #{e.message}"
           result[:errors] << {
             :rc => e.rc,
             :stdout => e.stdout,
@@ -171,7 +174,7 @@ module OpenShift
             :backtrace => e.backtrace.join("\n")
           }
         rescue Exception => e
-          progress.log "Caught an exception during upgrade: #{e.message}\n#{e.backtrace.join("\n")}"
+          progress.log "Caught an exception during upgrade: #{e.message}"
           result[:errors] << {
             :message => e.message,
             :backtrace => e.backtrace.join("\n")
@@ -183,7 +186,7 @@ module OpenShift
         end
 
         result[:steps] = progress.steps
-        result[:itinerary_entries] = itinerary ? itinerary.entries : {}
+        result[:log] = progress.report
 
         result
       end

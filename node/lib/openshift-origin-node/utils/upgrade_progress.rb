@@ -74,13 +74,9 @@ module OpenShift
           File.join(gear_home, 'app-root', 'runtime', ".upgrade_complete_#{marker}")
         end
 
-        def log(string, event_args = {})
-          if event_args.has_key?(:rc) || event_args.has_key?(:stdout) || event_args.has_key?(:stderr)
-            string = "#{string}\nrc: #{event_args[:rc]}\nstdout: #{event_args[:stdout]}\nstderr: #{event_args[:stderr]}"
-          end
-
-          @buffer << string
-          string
+        def log(message)
+          @buffer << message
+          message
         end
 
         def report
