@@ -1,6 +1,6 @@
 def upgrade_gear(name, login, gear_uuid)
   current_version = 'expected'
-  cmd = "oo-admin-upgrade upgrade_gear --app-name='#{@app.name}' --login='#{@app.login}' --upgrade-gear=#{gear_uuid} --target-version='#{current_version}'"
+  cmd = "oo-admin-upgrade upgrade-gear --app-name='#{@app.name}' --login='#{@app.login}' --upgrade-gear=#{gear_uuid} --version='#{current_version}'"
   $logger.info("Upgrading with command: #{cmd}")
   output = `#{cmd}`
   $logger.info("Upgrade output: #{output}")
@@ -325,7 +325,7 @@ When /^the gears on the node are upgraded with oo-admin-upgrade( --rerun)?$/ do 
   upgrade_cmd = "oo-admin-upgrade upgrade_node --target-version='expected'"
 
   if rerun
-    upgrade_cmd = "oo-admin-upgrade upgrade_node --target-version='expected' --rerun"
+    upgrade_cmd = "oo-admin-upgrade upgrade-node --version='expected' --mode=rerun"
   end
 
   output = `#{upgrade_cmd}`
