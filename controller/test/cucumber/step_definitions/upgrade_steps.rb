@@ -30,7 +30,7 @@ Then /^(no )?unprocessed ERB templates should exist in (.+)$/ do |negate, app_na
   assert_unprocessed_erbs(negate, app)
 end
 
-def assert_no_unprocessed_erbs(negate, app)
+def assert_unprocessed_erbs(negate, app)
   glob = Dir.glob(File.join($home_root, app.uid, '**', '**', '*.erb'))
   
   if negate
