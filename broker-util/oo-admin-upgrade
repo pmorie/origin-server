@@ -284,6 +284,7 @@ class Upgrader
 
       node[:active_gear_length] = active_gears.length
       node[:inactive_gear_length] = inactive_gears.length
+      node[:gears_length] = gears.length
 
       itinerary[:node_queue] << node
 
@@ -694,7 +695,7 @@ class UpgraderCli < Thor
       end
 
       args = {
-        version: options.target_version,
+        version: options.version,
         mode: mode,
         ignore_cartridge_version: options.ignore_cartridge_version?,
         target_server_identity: options.target_server_identity,
