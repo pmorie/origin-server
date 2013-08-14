@@ -240,7 +240,6 @@ module OpenShift
         # If version overrides are present, merge them on top of the manifest
         if @manifest.has_key?('Version-Overrides')
           vtree = @manifest['Version-Overrides'][@version]
-          puts vtree
 
           if vtree
             @manifest.merge!(vtree) 
