@@ -15,6 +15,10 @@ module OpenShift
         # @param template_git_url  URL for template application source/bare repository
         # @param manifest          Broker provided manifest
         def configure(cart_name, template_git_url=nil,  manifest=nil)
+          deployment_datetime = latest_deployment_datetime
+          # this is necessary so certain cartridge install scripts function properly
+          update_dependencies_symlink(deployment_datetime)
+
           @cartridge_model.configure(cart_name, template_git_url, manifest)
         end
 
@@ -31,21 +35,21 @@ module OpenShift
 
             begin
               ::OpenShift::Runtime::Utils::Cgroups.new(@uuid).boost do
-              logger.info "Executing initial gear prereceive for #{@uuid}"
-              Utils.oo_spawn("gear prereceive >> #{build_log} 2>&1",
-                             env:                 env,
-                             chdir:               @container_dir,
-                             uid:                 @uid,
-                             timeout:             @hourglass.remaining,
-                             expected_exitstatus: 0)
+                logger.info "Executing initial gear prereceive for #{@uuid}"
+                Utils.oo_spawn("gear prereceive >> #{build_log} 2>&1",
+                               env:                 env,
+                               chdir:               @container_dir,
+                               uid:                 @uid,
+                               timeout:             @hourglass.remaining,
+                               expected_exitstatus: 0)
 
-              logger.info "Executing initial gear postreceive for #{@uuid}"
-              Utils.oo_spawn("gear postreceive >> #{build_log} 2>&1",
-                             env:                 env,
-                             chdir:               @container_dir,
-                             uid:                 @uid,
-                             timeout:             @hourglass.remaining,
-                             expected_exitstatus: 0)
+                logger.info "Executing initial gear postreceive for #{@uuid}"
+                Utils.oo_spawn("gear postreceive >> #{build_log} 2>&1",
+                               env:                 env,
+                               chdir:               @container_dir,
+                               uid:                 @uid,
+                               timeout:             @hourglass.remaining,
+                               expected_exitstatus: 0)
               end
             rescue ::OpenShift::Runtime::Utils::ShellExecutionException => e
               max_bytes = 10 * 1024
@@ -58,6 +62,23 @@ module OpenShift
               message = "The initial build for the application failed: #{e.message}\n\n.Last #{max_bytes/1024} kB of build output:\n#{out}"
 
               raise ::OpenShift::Runtime::Utils::Sdk.translate_out_for_client(message, :error)
+            end
+          else
+            deployment_datetime = latest_deployment_datetime
+            deployment_state = (read_deployment_metadata(deployment_datetime, 'state') || '').chomp
+
+            # no need to do this for load balancer cartridges
+            # no need to do this when cartridges are added (state is already DEPLOYED)
+            unless deployment_state == 'DEPLOYED' or cartridge.web_proxy?
+              prepare(deployment_datetime: deployment_datetime)
+
+              update_repo_symlink(deployment_datetime)
+
+              write_deployment_metadata(deployment_datetime, 'state', 'DEPLOYED')
+
+              deployments_dir = PathUtils.join(@container_dir, 'app-deployments')
+              set_rw_permission_R(deployments_dir)
+              reset_permission_R(deployments_dir)
             end
           end
 
@@ -106,6 +127,12 @@ module OpenShift
             public_port = create_public_endpoint(private_ip, endpoint.private_port)
             add_env_var(endpoint.public_port_name, public_port)
 
+            # Write the load balancer env var if primary option is set
+            if endpoint.options and endpoint.options["primary"]
+              logger.info("primary option set for the endpoint")
+              add_env_var('LOAD_BALANCER_PORT', public_port, true)
+            end
+
             config = ::OpenShift::Config.new
             output << "NOTIFY_ENDPOINT_CREATE: #{endpoint.public_port_name} #{config.get('PUBLIC_IP')} #{public_port} #{private_ip} #{endpoint.private_port}\n" 
 
@@ -137,7 +164,7 @@ module OpenShift
             @container_plugin.delete_public_endpoints(proxy_mappings)
 
             config = ::OpenShift::Config.new
-            proxy_mappings.each { |p| 
+            proxy_mappings.each { |p|
               output << "NOTIFY_ENDPOINT_DELETE: #{p[:public_port_name]} #{config.get('PUBLIC_IP')} #{p[:proxy_port]}\n" if p[:proxy_port]
             }
 
@@ -217,6 +244,8 @@ module OpenShift
         #   :out        : an IO to which any stdout should be written (default: nil)
         #   :err        : an IO to which any stderr should be written (default: nil)
         #   :hot_deploy : a boolean to toggle hot deploy for the operation (default: false)
+        #   :branch     : the git branch to use
+        #   :force_clean_build    : if true, don't copy the previous deployment's dependencies to the new one (default: false)
         #
         def post_receive(options={})
           builder_cartridge = @cartridge_model.builder_cartridge
@@ -234,11 +263,19 @@ module OpenShift
                                         pre_action_hooks_enabled:  false,
                                         post_action_hooks_enabled: false)
 
-            ApplicationRepository.new(self).archive
+            # need to add the entry to the options hash, as it's used in build, prepare, distribute, and activate below
+            options[:deployment_datetime] = create_deployment_dir
+
+            repo_dir = PathUtils.join(@container_dir, 'app-deployments', options[:deployment_datetime], 'repo')
+            ApplicationRepository.new(self).archive(repo_dir, options[:branch] || 'master')
 
             build(options)
 
-            deploy(options)
+            prepare(options)
+
+            distribute(options)
+
+            activate(options)
           end
 
           report_build_analytics
@@ -265,20 +302,21 @@ module OpenShift
               out:                       options[:out],
               err:                       options[:err])
 
-          deploy(options)
+          # need to add the entry to the options hash, as it's used in build, prepare, distribute, and activate below
+          options[:deployment_datetime] = latest_deployment_datetime
 
-          if options[:init]
-            primary_cart_env_dir = PathUtils.join(@container_dir, @cartridge_model.primary_cartridge.directory, 'env')
-            primary_cart_env     = ::OpenShift::Runtime::Utils::Environ.load(primary_cart_env_dir)
-            ident                = primary_cart_env.keys.grep(/^OPENSHIFT_.*_IDENT/)
-            _, _, version, _     = Runtime::Manifest.parse_ident(primary_cart_env[ident.first])
+          gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
+          to_keep = (gear_env['OPENSHIFT_KEEP_DEPLOYMENTS'] || 1).to_i
 
-            @cartridge_model.post_install(@cartridge_model.primary_cartridge,
-                                          version,
-                                          out: options[:out],
-                err: options[:err])
+          clean_up_deployments_before(current_deployment_datetime)
 
-          end
+          repo_dir = PathUtils.join(@container_dir, 'app-deployments', options[:deployment_datetime], 'repo')
+
+          prepare(options)
+
+          distribute(options)
+
+          activate(options)
         end
 
         #
@@ -291,10 +329,20 @@ module OpenShift
         #   5. Run the cartridge +build+ control action
         #   6. Run the +build+ user action hook
         #
+        # options: hash
+        #   :deployment_datetime  : name of the current deployment (just the date + time)
+        #
         # Returns the combined output of all actions as a +String+.
         #
         def build(options={})
           @state.value = ::OpenShift::Runtime::State::BUILDING
+
+          overrides = {}
+          if options[:deployment_datetime]
+            overrides['OPENSHIFT_REPO_DIR'] = PathUtils.join(@container_dir, 'app-deployments', options[:deployment_datetime], 'repo') + "/"
+            update_dependencies_symlink(options[:deployment_datetime])
+          end
+
 
           buffer = ''
 
@@ -302,6 +350,7 @@ module OpenShift
                                                 @cartridge_model.primary_cartridge,
                                                 pre_action_hooks_enabled:  false,
               post_action_hooks_enabled: false,
+              env_overrides:             overrides,
               out:                       options[:out],
               err:                       options[:err])
 
@@ -309,6 +358,7 @@ module OpenShift
                                                 @cartridge_model.primary_cartridge,
                                                 pre_action_hooks_enabled: false,
               prefix_action_hooks:      false,
+              env_overrides:            overrides,
               out:                      options[:out],
               err:                      options[:err])
 
@@ -316,78 +366,348 @@ module OpenShift
                                                 @cartridge_model.primary_cartridge,
                                                 pre_action_hooks_enabled: false,
               prefix_action_hooks:      false,
+              env_overrides:            overrides,
               out:                      options[:out],
               err:                      options[:err])
 
           buffer
         end
 
+        # Prepares a deployment for distribution and activation
         #
-        # Implements the following deploy process:
+        # If a file is specified, its contents will be extracted to the deployment directory.
+        # The contents of the file must be the following:
+        #   repo                  : the application's deployable files (essentially an archive of the git repo)
+        #   dependencies          : all dependencies needed to run the application (e.g. virtenv for Python)
         #
-        #   1. Start secondary cartridges on the gear
-        #   2. Set the application state to +DEPLOYING+
-        #   3. Run the web proxy cartridge +deploy+ control action (if such a cartridge is present)
-        #   4. Run the primary cartridge +deploy+ control action
-        #   5. Run the +deploy+ user action hook
-        #   6. Start the primary cartridge on the gear
-        #   7. Run the primary cartridge +post-deploy+ control action
+        # If present, .openshift/action_hooks/prepare will be invoked prior to calculating the deployment id
+        #
+        # The deployment id is calculated based on the contents of the deployment directory
         #
         # options: hash
-        #   :out        : an IO to which any stdout should be written (default: nil)
-        #   :err        : an IO to which any stderr should be written (default: nil)
-        #   :hot_deploy : a boolean to toggle hot deploy for the operation (default: false)
+        #   :out                  : an IO to which any stdout should be written (default: nil)
+        #   :err                  : an IO to which any stderr should be written (default: nil)
+        #   :deployment_datetime  : date + time of the current deployment directory
+        #   :file                 : name of the binary deployment archive in app-root/archives to prepare
         #
         # Returns the combined output of all actions as a +String+.
         #
-        def deploy(options={})
-          buffer = "Starting application #{application_name}\n"
+        def prepare(options={})
+          env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
 
-          if options[:out]
-            options[:out].puts(buffer)
+          # override deployment dir env var for hook use
+          deployment_datetime = options[:deployment_datetime]
+          deployment_dir = PathUtils.join(@container_dir, 'app-deployments', deployment_datetime)
+          env['OPENSHIFT_REPO_DIR'] = "#{deployment_dir}/repo"
+
+          if options[:file]
+            file = PathUtils.join(@container_dir, 'app-archives', options[:file])
+            if !File.exist?(file)
+              raise 'TODO'
+            end
+
+            # explode file
+            # TODO support things other than tar.gz
+            out, err, rc = run_in_container_context("tar xf #{file}",
+                                                    env: env,
+                                                    chdir: deployment_dir,
+                                                    expected_exitstatus: 0)
+            # TODO check err/rc
           end
 
-          buffer << start_gear(secondary_only: true,
-              user_initiated: true,
-              hot_deploy:     options[:hot_deploy],
-              out:            options[:out],
-              err:            options[:err])
+          buffer = ''
 
-          @state.value = ::OpenShift::Runtime::State::DEPLOYING
+          # call prepare hook
+          buffer << @cartridge_model.do_action_hook('prepare', env, options)
 
-          web_proxy_cart = @cartridge_model.web_proxy
-          if web_proxy_cart
-            buffer << @cartridge_model.do_control('deploy',
-                                                  web_proxy_cart,
-                                                  pre_action_hooks_enabled: false,
-                prefix_action_hooks:      false,
-                out:                      options[:out],
-                err:                      options[:err])
+          deployment_id = calculate_deployment_id(deployment_datetime)
+
+          # this is needed so the distribute and activate steps down the line can work
+          options[:deployment_id] = deployment_id
+
+          # create symlink so it's easier to find later by id
+          FileUtils.cd(PathUtils.join(@container_dir, 'app-deployments', 'by-id')) do |d|
+            FileUtils.ln_s(PathUtils.join('..', deployment_datetime), deployment_id)
           end
 
-          buffer << @cartridge_model.do_control('deploy',
-                                                @cartridge_model.primary_cartridge,
-                                                pre_action_hooks_enabled: false,
-              prefix_action_hooks:      false,
-              out:                      options[:out],
-              err:                      options[:err])
+          write_deployment_metadata(deployment_datetime, 'id', deployment_id)
 
-          buffer << start_gear(primary_only:   true,
-              user_initiated: true,
-              hot_deploy:     options[:hot_deploy],
-              out:            options[:out],
-              err:            options[:err])
-
-          buffer << @cartridge_model.do_control('post-deploy',
-                                                @cartridge_model.primary_cartridge,
-                                                pre_action_hooks_enabled: false,
-              prefix_action_hooks:      false,
-              out:                      options[:out],
-              err:                      options[:err])
+          buffer << "Prepared deployment artifacts in #{deployment_dir}\n"
+          buffer << "Deployment id is #{deployment_id}"
 
           buffer
         end
 
+        # options: hash
+        #   :out             : an IO to which any stdout should be written (default: nil)
+        #   :err             : an IO to which any stderr should be written (default: nil)
+        #   :deployment_id   : previously built/prepared deployment
+        #
+        # Returns the combined output of all actions as a +String+.
+        #
+        def distribute(options={})
+          return if @cartridge_model.web_proxy.nil?
+          # TODO error if deployment doesn't exist
+
+          if options[:deployment_id]
+            # if deployment_id is specified, use that
+            deployment_id = options[:deployment_id]
+            deployment_datetime = get_deployment_datetime_for_deployment_id(deployment_id)
+          else
+            # otherwise, use the most recent deployment dir
+            deployment_datetime = latest_deployment_datetime
+            deployment_id = read_deployment_metadata(deployment_datetime, 'id').chomp
+          end
+
+          deployment_dir = PathUtils.join(@container_dir, 'app-deployments', deployment_datetime)
+
+          buffer = ''
+
+          if options[:gears]
+            gears = options[:gears]
+          else
+            gears = ::OpenShift::Runtime::GearRegistry.new(self).ssh_urls
+          end
+
+          gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
+
+          #TODO this really should be parellelized
+          gears.each do |gear|
+            # since the gear will look like 51e96b5e4f43c070fc000001@s1-agoldste.dev.rhcloud.com
+            # splitting by @ and taking the first element gets the gear's uuid
+            # no need to distribute to self
+            gear_uuid = gear.split('@')[0]
+            next if gear_uuid == @uuid
+
+            out, err, rc = run_in_container_context("rsync -axvz --rsh=/usr/bin/oo-ssh ./ #{gear}:app-deployments/#{deployment_datetime}/",
+                                                    env: gear_env,
+                                                    chdir: deployment_dir,
+                                                    expected_exitstatus: 0)
+
+            # TODO check err, rc
+            buffer << out
+
+            # create by-id symlink
+            out, err, rc = run_in_container_context("rsync -axvz --rsh=/usr/bin/oo-ssh #{deployment_id} #{gear}:app-deployments/by-id/#{deployment_id}",
+                                                    env: gear_env,
+                                                    chdir: PathUtils.join(@container_dir, 'app-deployments', 'by-id'),
+                                                    expected_exitstatus: 0)
+
+            # TODO check err, rc
+            buffer << out
+          end
+
+          buffer
+        end
+
+        #
+        # Activates a specific deployment id
+        #
+        # options: hash
+        #   :deployment_id : the id of the deployment to activate (required)
+        #   :out           : an IO to which any stdout should be written (default: nil)
+        #   :err           : an IO to which any stderr should be written (default: nil)
+        #
+        def activate(options={})
+          if options[:deployment_id]
+            # if deployment_id is specified, use that
+            deployment_id = options[:deployment_id]
+            deployment_datetime = get_deployment_datetime_for_deployment_id(deployment_id)
+          else
+            # otherwise, use the most recent deployment dir
+            deployment_datetime = latest_deployment_datetime
+            deployment_id = read_deployment_metadata(deployment_datetime, 'id').chomp
+          end
+
+          deployment_dir = PathUtils.join(@container_dir, 'app-deployments', deployment_datetime)
+
+          buffer = ''
+
+          gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
+
+          # TODO support zero downtime deployments
+          if @state.value == State::STARTED
+            output = stop_gear(options)
+  #          puts output
+            buffer << output
+            options[:out].puts(output) if options[:out]
+          end
+
+          update_repo_symlink(deployment_datetime)
+          update_dependencies_symlink(deployment_datetime)
+
+          # TODO only do for children?
+          @cartridge_model.do_control('update-configuration',
+                                      @cartridge_model.primary_cartridge,
+                                      pre_action_hooks_enabled:  false,
+                                      post_action_hooks_enabled: false,
+                                      out:                       options[:out],
+                                      err:                       options[:err])
+
+          msg = "Starting application #{application_name}\n"
+          buffer << msg
+          options[:out].puts(msg) if options[:out]
+
+          output = start_gear(secondary_only: true,
+                              user_initiated: true,
+                              hot_deploy:     options[:hot_deploy],
+                              out:            options[:out],
+                              err:            options[:err])
+
+#          puts output
+          buffer << output
+
+          @state.value = ::OpenShift::Runtime::State::DEPLOYING
+
+          output = @cartridge_model.do_control('deploy',
+                                                @cartridge_model.primary_cartridge,
+                                                pre_action_hooks_enabled: false,
+                                                prefix_action_hooks:      false,
+                                                out:                      options[:out],
+                                                err:                      options[:err])
+
+#          puts output
+          buffer << output
+
+          output = start_gear(primary_only:   true,
+                              user_initiated: true,
+                              hot_deploy:     options[:hot_deploy],
+                              out:            options[:out],
+                              err:            options[:err])
+
+#          puts output
+          buffer << output
+
+          output = @cartridge_model.do_control('post-deploy',
+                                                @cartridge_model.primary_cartridge,
+                                                pre_action_hooks_enabled: false,
+                                                prefix_action_hooks:      false,
+                                                out:                      options[:out],
+                                                err:                      options[:err])
+
+#          puts output
+          buffer << output
+
+          if options[:init]
+            primary_cart_env_dir = PathUtils.join(@container_dir, @cartridge_model.primary_cartridge.directory, 'env')
+            primary_cart_env     = ::OpenShift::Runtime::Utils::Environ.load(primary_cart_env_dir)
+            ident                = primary_cart_env.keys.grep(/^OPENSHIFT_.*_IDENT/)
+            _, _, version, _     = Runtime::Manifest.parse_ident(primary_cart_env[ident.first])
+
+            @cartridge_model.post_install(@cartridge_model.primary_cartridge,
+                                          version,
+                                          out: options[:out],
+                                          err: options[:err])
+
+          end
+
+          unless options[:child] or @cartridge_model.web_proxy.nil?
+            #TODO this really should be parellelized
+            if options[:gears]
+              gears = options[:gears]
+            else
+              gears = ::OpenShift::Runtime::GearRegistry.new(self).ssh_urls
+            end
+
+            gears.each do |gear|
+              # since the gear will look like 51e96b5e4f43c070fc000001@s1-agoldste.dev.rhcloud.com
+              # splitting by @ and taking the first element gets the gear's uuid
+              gear_uuid = gear.split('@')[0]
+
+              # skip self
+              next if gear_uuid == @uuid
+
+              puts "Activating child gear #{gear_uuid}"
+
+              out, err, rc = run_in_container_context("#{::OpenShift::Runtime::ApplicationContainer::GEAR_TO_GEAR_SSH} #{gear} gear activate #{deployment_id} --child",
+                                                      env: gear_env,
+                                                      expected_exitstatus: 0)
+              # TODO check err, rc
+              buffer << out
+#              puts out
+            end
+          end
+
+          write_deployment_metadata(deployment_datetime, 'state', 'DEPLOYED')
+          clean_up_deployments_before(deployment_datetime)
+
+          buffer
+        end
+
+        #
+        # Rolls back to the previous deployment
+        #
+        # options: hash
+        #   :out           : an IO to which any stdout should be written (default: nil)
+        #   :err           : an IO to which any stderr should be written (default: nil)
+        #
+        def rollback(options={})
+          deployments_dir = PathUtils.join(@container_dir, 'app-deployments')
+
+          current_deployment = latest_deployment_datetime
+
+          # get a list of all entries in app-deployments excluding 'by-id' and the current deployment dir
+          deployments = Dir["#{deployments_dir}/*"].entries.reject {|e| ['by-id', current_deployment].include?(File.basename(e))}.sort.reverse
+
+          # make sure we get the latest 'deployed' dir prior to the current one
+          previous_deployment = nil
+          deployments.each do |d|
+            deployment_state = read_deployment_metadata(File.basename(d), 'state') || ''
+            if deployment_state.chomp == 'DEPLOYED'
+              previous_deployment = d
+              break
+            end
+          end
+
+          if previous_deployment
+            # TODO support zero downtime rollbacks
+            if state.value == State::STARTED
+              output = stop_gear(options)
+              options[:out].puts(output) if options[:out]
+            end
+
+            # delete current deployment
+            delete_deployment(current_deployment)
+
+            deployment_id = read_deployment_metadata(File.basename(previous_deployment), 'id').chomp
+
+            # activate (but don't activate children, since invoking rollback will handle that below)
+            activate(options.merge(deployment_id: deployment_id, child: true))
+
+            # process all children
+            unless options[:child] or @cartridge_model.web_proxy.nil?
+              gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
+
+              if options[:gears]
+                gears = options[:gears]
+              else
+                gears = ::OpenShift::Runtime::GearRegistry.new(self).ssh_urls
+              end
+
+              #TODO this really should be parellelized
+              gears.each do |gear|
+                # since the gear will look like 51e96b5e4f43c070fc000001@s1-agoldste.dev.rhcloud.com
+                # splitting by @ and taking the first element gets the gear's uuid
+                gear_uuid = gear.split('@')[0]
+
+                # skip self
+                next if gear_uuid == @uuid
+
+                puts "Rolling back child gear #{gear_uuid}"
+
+                out, err, rc = run_in_container_context("#{::OpenShift::Runtime::ApplicationContainer::GEAR_TO_GEAR_SSH} #{gear} gear rollback --child",
+                                                        env: gear_env,
+                                                        expected_exitstatus: 0)
+                # TODO check err, rc
+                #buffer << out
+  #              puts out
+              end
+            end
+          else
+            #TODO finish
+            raise 'error'
+          end
+        end
 
         # === Cartridge control methods
 

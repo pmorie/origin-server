@@ -10,7 +10,6 @@ function relative-virtenv {
 
 function create-virtenv {
     # Initialize the virtual environment
-    mkdir -p $OPENSHIFT_PYTHON_DIR/virtenv
     virtualenv --quiet --never-download --system-site-packages $OPENSHIFT_PYTHON_DIR/virtenv
 
     # Bug 995284
