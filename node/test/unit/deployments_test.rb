@@ -334,14 +334,57 @@ class DeploymentsTest < OpenShift::NodeTestCase
     @container.clean_up_deployments_before(time_to_s(Time.now))
   end
 
+  # make sure it only keeps 1 deployment if OPENSHIFT_KEEP_DEPLOYMENTS is not defined
   def test_clean_up_deployments_before_keep_undefined
     gear_env = {}
     ::OpenShift::Runtime::Utils::Environ.stubs(:for_gear).returns(gear_env)
 
     deployment_datetime = Time.now
     deployment_datetime_s = time_to_s(deployment_datetime)
+
+    deployments = %w(aaa bbb ccc).map {|e| "/var/lib/openshift/uuid/app-deployments/#{e}"}
+    @container.expects(:all_deployments).returns(deployments).times(2)
+    @container.expects(:read_deployment_metadata).returns('DEPLOYED').times(2)
+
+    @container.expects(:delete_deployment).with('aaa')
+    @container.expects(:delete_deployment).with('bbb')
+
+    @container.clean_up_deployments_before('ccc')
   end
 
-  # keep defined
-  # 
+  # make sure it only keeps # of deployments specified by OPENSHIFT_KEEP_DEPLOYMENTS
+  def test_clean_up_deployments_before_keep_defined
+    gear_env = {'OPENSHIFT_KEEP_DEPLOYMENTS' => "2"}
+    ::OpenShift::Runtime::Utils::Environ.stubs(:for_gear).returns(gear_env)
+
+    deployment_datetime = Time.now
+    deployment_datetime_s = time_to_s(deployment_datetime)
+
+    deployments = %w(aaa bbb ccc).map {|e| "/var/lib/openshift/uuid/app-deployments/#{e}"}
+    @container.expects(:all_deployments).returns(deployments).times(2)
+    @container.expects(:read_deployment_metadata).returns('DEPLOYED').times(2)
+
+    @container.expects(:delete_deployment).with('aaa')
+
+    @container.clean_up_deployments_before('ccc')
+  end
+
+  # make sure it doesn't delete any deployments if we're under the limit
+  def test_clean_up_deployments_before_keep_defined
+    %w(3 4).each do |keep|
+      gear_env = {'OPENSHIFT_KEEP_DEPLOYMENTS' => keep}
+      ::OpenShift::Runtime::Utils::Environ.stubs(:for_gear).returns(gear_env)
+
+      deployment_datetime = Time.now
+      deployment_datetime_s = time_to_s(deployment_datetime)
+
+      deployments = %w(aaa bbb ccc).map {|e| "/var/lib/openshift/uuid/app-deployments/#{e}"}
+      @container.expects(:all_deployments).returns(deployments).times(2)
+      @container.expects(:read_deployment_metadata).returns('DEPLOYED').times(2)
+
+      @container.expects(:delete_deployment).never
+
+      @container.clean_up_deployments_before('ccc')
+    end
+  end
 end
