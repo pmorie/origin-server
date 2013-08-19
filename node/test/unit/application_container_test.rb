@@ -91,6 +91,7 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
             Private-Port-Name: EXAMPLE_PORT1
             Private-Port:      8080
             Public-Port-Name:  EXAMPLE_PUBLIC_PORT1
+            Options:           { primary: true }
             Mappings:
               - Frontend:      "/front1a"
                 Backend:       "/back1a"
@@ -153,7 +154,11 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
     proxy.expects(:add).with(@user_uid.to_i, "127.0.0.1", 8082).returns(@ports_begin+2)
     proxy.expects(:add).with(@user_uid.to_i, "127.0.0.2", 9090).returns(@ports_begin+3)
 
-    @container.expects(:add_env_var).returns(nil).times(4)
+    @container.expects(:add_env_var).with('OPENSHIFT_MOCK_EXAMPLE_PUBLIC_PORT1', @ports_begin)
+    @container.expects(:add_env_var).with('LOAD_BALANCER_PORT', @ports_begin, true)
+    @container.expects(:add_env_var).with('OPENSHIFT_MOCK_EXAMPLE_PUBLIC_PORT2', @ports_begin+1)
+    @container.expects(:add_env_var).with('OPENSHIFT_MOCK_EXAMPLE_PUBLIC_PORT3', @ports_begin+2)
+    @container.expects(:add_env_var).with('OPENSHIFT_MOCK_EXAMPLE_PUBLIC_PORT4', @ports_begin+3)
 
     @container.create_public_endpoints(@mock_cartridge.name)
   end
@@ -335,5 +340,15 @@ class ApplicationContainerTest < OpenShift::NodeTestCase
     rc, msg = @container.user_var_add({'TOO_BIG' => '*' * 513})
     assert_equal 127, rc
     assert_equal "CLIENT_ERROR: 'TOO_BIG' value exceeds maximum size of 512b", msg
+  end
+
+  def test_deconfigure
+    @container.cartridge_model.expects(:deconfigure).with('mock-0.1')
+    @container.deconfigure('mock-0.1')
+  end
+
+  def test_unsubscribe
+    @container.cartridge_model.expects(:unsubscribe).with('mock-0.1', 'pub-cart')
+    @container.unsubscribe('mock-0.1', 'pub-cart')
   end
 end

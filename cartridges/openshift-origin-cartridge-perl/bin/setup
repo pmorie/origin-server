@@ -1,9 +1,13 @@
-#!/bin/bash -eu
+ ike,#!/bin/bash -eu
 
 case "$1" in
   -v|--version)
     version="$2"
 esac
+
+# Create dependencies symlink
+mkdir -p $OPENSHIFT_DEPENDENCIES_DIR/.cpanm
+ln -sf ${OPENSHIFT_DEPENDENCIES_DIR}.cpanm ${OPENSHIFT_HOMEDIR}.cpanm
 
 # Copy the version specific files to perl directory
 shopt -s dotglob
