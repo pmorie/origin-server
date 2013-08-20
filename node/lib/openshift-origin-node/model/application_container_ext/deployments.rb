@@ -170,7 +170,7 @@ module OpenShift
         def archive
           deployment_datetime = current_deployment_datetime
           deployment_dir = PathUtils.join(@container_dir, 'app-deployments', deployment_datetime)
-          command = "tar zcf - ."
+          command = "tar zcf - --exclude metadata ."
           out, err, rc = run_in_container_context(command,
                                                   chdir: deployment_dir,
                                                   expected_exitstatus: 0)
