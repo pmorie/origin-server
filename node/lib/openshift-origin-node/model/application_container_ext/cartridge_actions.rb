@@ -293,22 +293,20 @@ module OpenShift
         #   :out  : an IO to which any stdout should be written (default: nil)
         #   :err  : an IO to which any stderr should be written (default: nil)
         #   :init : boolean; if true, post-install steps will be executed (default: false)
+        #   :deployment_datetime : string; the deployment datetime to deploy
         #
         def remote_deploy(options={})
           @cartridge_model.do_control('update-configuration',
                                       @cartridge_model.primary_cartridge,
                                       pre_action_hooks_enabled:  false,
-              post_action_hooks_enabled: false,
-              out:                       options[:out],
-              err:                       options[:err])
-
-          # need to add the entry to the options hash, as it's used in build, prepare, distribute, and activate below
-          options[:deployment_datetime] = latest_deployment_datetime
+                                      post_action_hooks_enabled: false,
+                                      out:                       options[:out],
+                                      err:                       options[:err])
 
           gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
           to_keep = (gear_env['OPENSHIFT_KEEP_DEPLOYMENTS'] || 1).to_i
 
-          clean_up_deployments_before(current_deployment_datetime)
+          #clean_up_deployments_before(current_deployment_datetime)
 
           repo_dir = PathUtils.join(@container_dir, 'app-deployments', options[:deployment_datetime], 'repo')
 
@@ -449,15 +447,8 @@ module OpenShift
           return if @cartridge_model.web_proxy.nil?
           # TODO error if deployment doesn't exist
 
-          if options[:deployment_id]
-            # if deployment_id is specified, use that
-            deployment_id = options[:deployment_id]
-            deployment_datetime = get_deployment_datetime_for_deployment_id(deployment_id)
-          else
-            # otherwise, use the most recent deployment dir
-            deployment_datetime = latest_deployment_datetime
-            deployment_id = read_deployment_metadata(deployment_datetime, 'id').chomp
-          end
+          deployment_id = options[:deployment_id]
+          deployment_datetime = get_deployment_datetime_for_deployment_id(deployment_id)
 
           deployment_dir = PathUtils.join(@container_dir, 'app-deployments', deployment_datetime)
 

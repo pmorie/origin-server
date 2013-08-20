@@ -1498,8 +1498,9 @@ module OpenShift
                                                              expected_exitstatus: 0)
         end
 
-        # activate the latest deployment on all the new gears
-        @container.activate(gears: new_gears)
+        # activate the current deployment on all the new gears
+        deployment_id = @container.read_deployment_metadata(@container.current_deployment_datetime, 'id').chomp
+        @container.activate(gears: new_gears, deployment_id: deployment_id)
 
         # TODO disable local gear like in set-registry script
       end

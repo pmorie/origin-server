@@ -29,4 +29,4 @@ rsync $OPENSHIFT_HOMEDIR/app-root/runtime/dependencies/ $upstream_ssh:app-deploy
 
 
 # Configure / start app
-$GIT_SSH $upstream_ssh 'gear remotedeploy'
+$GIT_SSH $upstream_ssh 'gear remotedeploy --deployment-datetime $deployment_dir'

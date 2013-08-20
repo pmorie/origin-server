@@ -293,6 +293,7 @@ command :remotedeploy do |c|
   c.option "--init", "Run post_install for new gears"
   c.option "--hot-deploy BOOLEAN", "Perform hot deployment according to the specified "\
            "argument rather than checking for the presence of the hot_deploy marker in the application Git repo"
+  c.option "--deployment-datetime NAME" "Datetime to deploy"
 
   c.action do |args, options|
     do_command(c, options) do
@@ -302,11 +303,11 @@ command :remotedeploy do |c|
         hot_deploy_enabled = (options.hot_deploy == true)
       end
 
-      if options.init
-        @container.remote_deploy(out: $stdout, err: $stderr, hot_deploy: hot_deploy_enabled, init: true)
-      else
-        @container.remote_deploy(out: $stdout, err: $stderr, hot_deploy: hot_deploy_enabled)
-      end
+      @container.remote_deploy(out: $stdout,
+                               err: $stderr,
+                               hot_deploy: hot_deploy_enabled,
+                               init: options.init,
+                               deployment_datetime: options.deployment_datetime)
     end
   end
 end
