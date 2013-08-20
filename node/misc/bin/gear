@@ -226,8 +226,9 @@ command :prepare do |c|
   c.action do |args, options|
     # TODO make sure there is a file arg
     do_command(c, options) do
-      deployment_dir = @container.create_deployment_dir
-      puts @container.prepare(out: $stdout, err: $stderr, deployment_dir: deployment_dir, file: args[0])
+      # pass force_clean_build:true so we don't move/copy dependencies from any prior deployment
+      deployment_datetime = @container.create_deployment_dir(force_clean_build: true)
+      puts @container.prepare(out: $stdout, err: $stderr, deployment_datetime: deployment_datetime, file: args[0])
     end
   end
 end
@@ -321,9 +322,20 @@ command :deploy do |c|
       # - if $OPENSHIFT_DEPLOYMENT_BRANCH is set, use that
       # - fallback to master
       branch_to_deploy = args[0] || ENV['OPENSHIFT_DEPLOYMENT_BRANCH'] || 'master'
-      
+
       @container.pre_receive(out: $stdout, err: $stderr, hot_deploy: file_committed?(HOT_DEPLOY_MARKER))
       @container.post_receive(out: $stdout, err: $stderr, hot_deploy: file_committed?(HOT_DEPLOY_MARKER), branch: branch_to_deploy)
+    end
+  end
+end
+
+command :archive do |c|
+  c.syntax = "#{name} archive"
+  c.description = "Archive the current deployment so it can be used as a binary deployment artifact"
+  c.option "--file FILE", "The path to the file to create"
+  c.action do |args, options|
+    do_command(c, options) do
+      File.open(options.file, "w") { |f| f.write @container.archive }
     end
   end
 end

@@ -166,6 +166,16 @@ module OpenShift
             count -= 1
           end
         end
+
+        def archive
+          deployment_datetime = current_deployment_datetime
+          deployment_dir = PathUtils.join(@container_dir, 'app-deployments', deployment_datetime)
+          command = "tar zcf - ."
+          out, err, rc = run_in_container_context(command,
+                                                  chdir: deployment_dir,
+                                                  expected_exitstatus: 0)
+          out
+        end
       end
     end
   end

@@ -471,7 +471,7 @@ module OpenShift
 
           gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
 
-          #TODO this really should be parellelized
+          #TODO this really should be parallelized
           gears.each do |gear|
             # since the gear will look like 51e96b5e4f43c070fc000001@s1-agoldste.dev.rhcloud.com
             # splitting by @ and taking the first element gets the gear's uuid
