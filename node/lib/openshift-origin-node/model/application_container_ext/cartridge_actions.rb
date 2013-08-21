@@ -222,10 +222,11 @@ module OpenShift
                                         out: options[:out],
                 err: options[:err])
           else
-            stop_gear(user_initiated: true,
-                hot_deploy:     options[:hot_deploy],
-                out:            options[:out],
-                err:            options[:err])
+            stop_gear(user_initiated:     true,
+                      hot_deploy:         options[:hot_deploy],
+                      exclude_web_proxy:  true,
+                      out:                options[:out],
+                      err:                options[:err])
           end
         end
 
@@ -510,9 +511,8 @@ module OpenShift
 
           gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
 
-          # TODO support zero downtime deployments
           if @state.value == State::STARTED
-            output = stop_gear(options)
+            output = stop_gear(options.merge(exclude_web_proxy: true))
             buffer << output
             options[:out].puts(output) if options[:out]
           end
@@ -534,6 +534,7 @@ module OpenShift
 
           output = start_gear(secondary_only: true,
                               user_initiated: true,
+                              exclude_web_proxy: true,
                               hot_deploy:     options[:hot_deploy],
                               out:            options[:out],
                               err:            options[:err])
@@ -553,6 +554,7 @@ module OpenShift
 
           output = start_gear(primary_only:   true,
                               user_initiated: true,
+                              exclude_web_proxy: true,
                               hot_deploy:     options[:hot_deploy],
                               out:            options[:out],
                               err:            options[:err])

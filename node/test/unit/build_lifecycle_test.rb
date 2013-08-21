@@ -54,7 +54,7 @@ class BuildLifecycleTest < OpenShift::NodeTestCase
   def test_pre_receive_default_builder
     @cartridge_model.expects(:builder_cartridge).returns(nil)
 
-    @container.expects(:stop_gear).with(user_initiated: true, hot_deploy: nil, out: $stdout, err: $stderr)
+    @container.expects(:stop_gear).with(user_initiated: true, hot_deploy: nil, exclude_web_proxy: true, out: $stdout, err: $stderr)
 
     @container.pre_receive(out: $stdout, err: $stderr)
   end

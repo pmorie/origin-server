@@ -1201,12 +1201,14 @@ module OpenShift
       # in the gear.
       #
       # +options+: hash
-      #   :user_initiated => [boolean]  : Indicates whether the operation was user initated.
-      #                                   Default is +true+.
-      #   :out                          : An +IO+ object to which control script STDOUT should be directed. If
-      #                                   +nil+ (the default), output is logged.
-      #   :err                          : An +IO+ object to which control script STDERR should be directed. If
-      #                                   +nil+ (the default), output is logged.
+      #   :user_initiated => [boolean]    : Indicates whether the operation was user initated.
+      #                                     Default is +true+.
+      #   :exclude_web_proxy => [boolean] : Indicates whether to exclude stopping the web proxy cartridge.
+      #                                     Default is +false+
+      #   :out                            : An +IO+ object to which control script STDOUT should be directed. If
+      #                                     +nil+ (the default), output is logged.
+      #   :err                            : An +IO+ object to which control script STDERR should be directed. If
+      #                                     +nil+ (the default), output is logged.
       #
       # Returns the combined output of all +stop+ action executions as a +String+.
       def stop_gear(options={})
@@ -1215,6 +1217,8 @@ module OpenShift
         buffer = ''
 
         each_cartridge do |cartridge|
+          next if options[:exclude_web_proxy] and cartridge.web_proxy?
+
           buffer << stop_cartridge(cartridge, options)
         end
 
@@ -1229,16 +1233,18 @@ module OpenShift
       # to be started is configurable via +options+.
       #
       # +options+: hash
-      #   :primary_only   => [boolean]  : If +true+, only the primary cartridge will be started.
-      #                                   Mutually exclusive with +secondary_only+.
-      #   :secondary_only => [boolean]  : If +true+, all cartridges except the primary cartridge
-      #                                   will be started. Mutually exclusive with +primary_only+.
-      #   :user_initiated => [boolean]  : Indicates whether the operation was user initated.
-      #                                   Default is +true+.
-      #   :out                          : An +IO+ object to which control script STDOUT should be directed. If
-      #                                   +nil+ (the default), output is logged.
-      #   :err                          : An +IO+ object to which control script STDERR should be directed. If
-      #                                   +nil+ (the default), output is logged.
+      #   :primary_only   => [boolean]    : If +true+, only the primary cartridge will be started.
+      #                                     Mutually exclusive with +secondary_only+.
+      #   :secondary_only => [boolean]    : If +true+, all cartridges except the primary cartridge
+      #                                     will be started. Mutually exclusive with +primary_only+.
+      #   :user_initiated => [boolean]    : Indicates whether the operation was user initated.
+      #                                     Default is +true+.
+      #   :exclude_web_proxy => [boolean] : Indicates whether to exclude stopping the web proxy cartridge.
+      #                                     Default is +false+
+      #   :out                            : An +IO+ object to which control script STDOUT should be directed. If
+      #                                     +nil+ (the default), output is logged.
+      #   :err                            : An +IO+ object to which control script STDERR should be directed. If
+      #                                     +nil+ (the default), output is logged.
       #
       # Returns the combined output of all +start+ action executions as a +String+.
       def start_gear(options={})
@@ -1252,6 +1258,7 @@ module OpenShift
         each_cartridge do |cartridge|
           next if options[:primary_only] and cartridge.name != primary_cartridge.name
           next if options[:secondary_only] and cartridge.name == primary_cartridge.name
+          next if options[:exclude_web_proxy] and cartridge.web_proxy?
 
           buffer << start_cartridge('start', cartridge, options)
         end
