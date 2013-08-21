@@ -265,7 +265,11 @@ module OpenShift
                                         post_action_hooks_enabled: false)
 
             # need to add the entry to the options hash, as it's used in build, prepare, distribute, and activate below
-            options[:deployment_datetime] = create_deployment_dir
+            if options[:hot_deploy]
+              options[:deployment_datetime] = current_deployment_datetime
+            else
+              options[:deployment_datetime] = create_deployment_dir
+            end
 
             repo_dir = PathUtils.join(@container_dir, 'app-deployments', options[:deployment_datetime], 'repo')
             ApplicationRepository.new(self).archive(repo_dir, options[:branch] || 'master')
