@@ -387,4 +387,18 @@ class DeploymentsTest < OpenShift::NodeTestCase
       @container.clean_up_deployments_before('ccc')
     end
   end
+
+  def test_archive
+    current = time_to_s(Time.now)
+    @container.expects(:current_deployment_datetime).returns(current)
+    deployment_dir = File.join(@container.container_dir, 'app-deployments', current)
+    @container.expects(:run_in_container_context).with("tar zcf - --exclude metadata .",
+                                                       chdir: deployment_dir,
+                                                       expected_exitstatus: 0)
+                                                 .returns("foo")
+
+    output = @container.archive
+
+    assert_equal 'foo', output
+  end
 end
