@@ -498,17 +498,11 @@ module OpenShift
         #   :deployment_id : the id of the deployment to activate (required)
         #   :out           : an IO to which any stdout should be written (default: nil)
         #   :err           : an IO to which any stderr should be written (default: nil)
+        #   :gears         : an Array of FQDNs to activate, or all child gears if nil
         #
         def activate(options={})
-          if options[:deployment_id]
-            # if deployment_id is specified, use that
-            deployment_id = options[:deployment_id]
-            deployment_datetime = get_deployment_datetime_for_deployment_id(deployment_id)
-          else
-            # otherwise, use the most recent deployment dir
-            deployment_datetime = latest_deployment_datetime
-            deployment_id = read_deployment_metadata(deployment_datetime, 'id').chomp
-          end
+          deployment_id = options[:deployment_id]
+          deployment_datetime = get_deployment_datetime_for_deployment_id(deployment_id)
 
           deployment_dir = PathUtils.join(@container_dir, 'app-deployments', deployment_datetime)
 
@@ -519,7 +513,6 @@ module OpenShift
           # TODO support zero downtime deployments
           if @state.value == State::STARTED
             output = stop_gear(options)
-  #          puts output
             buffer << output
             options[:out].puts(output) if options[:out]
           end
@@ -545,7 +538,6 @@ module OpenShift
                               out:            options[:out],
                               err:            options[:err])
 
-#          puts output
           buffer << output
 
           @state.value = ::OpenShift::Runtime::State::DEPLOYING
@@ -557,7 +549,6 @@ module OpenShift
                                                 out:                      options[:out],
                                                 err:                      options[:err])
 
-#          puts output
           buffer << output
 
           output = start_gear(primary_only:   true,
@@ -566,7 +557,6 @@ module OpenShift
                               out:            options[:out],
                               err:            options[:err])
 
-#          puts output
           buffer << output
 
           output = @cartridge_model.do_control('post-deploy',
@@ -576,7 +566,6 @@ module OpenShift
                                                 out:                      options[:out],
                                                 err:                      options[:err])
 
-#          puts output
           buffer << output
 
           if options[:init]
@@ -593,7 +582,7 @@ module OpenShift
           end
 
           unless options[:child] or @cartridge_model.web_proxy.nil?
-            #TODO this really should be parellelized
+            #TODO this really should be parallelized
             if options[:gears]
               gears = options[:gears]
             else
