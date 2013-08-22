@@ -1507,7 +1507,8 @@ module OpenShift
 
         # activate the current deployment on all the new gears
         deployment_id = @container.read_deployment_metadata(@container.current_deployment_datetime, 'id').chomp
-        @container.activate(gears: new_gears, deployment_id: deployment_id)
+        # since the gears are new, set init to true and hot_deploy to false
+        @container.activate_many(gears: new_gears, deployment_id: deployment_id, init: true, hot_deploy: false)
 
         # TODO disable local gear like in set-registry script
       end

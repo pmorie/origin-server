@@ -280,7 +280,15 @@ module OpenShift
 
             distribute(options)
 
+            # activate the local gear
             activate(options)
+
+            # if we have children, activate them
+            if @cartridge_model.web_proxy
+              # get all gears except self
+              gears = ::OpenShift::Runtime::GearRegistry.new(self).ssh_urls.reject { |g| g.split('@')[0] == @uuid }
+              activate_many(options.merge(gears: gears))
+            end
           end
 
           report_build_analytics
@@ -497,13 +505,47 @@ module OpenShift
         end
 
         #
-        # Activates a specific deployment id
+        # Activates a specific deployment id for the specified gears
         #
         # options: hash
         #   :deployment_id : the id of the deployment to activate (required)
         #   :out           : an IO to which any stdout should be written (default: nil)
         #   :err           : an IO to which any stderr should be written (default: nil)
-        #   :gears         : an Array of FQDNs to activate, or all child gears if nil
+        #   :gears         : an Array of FQDNs to activate (required)
+        #
+        def activate_many(options={})
+          gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
+          buffer = ''
+
+          #TODO this really should be parallelized
+          options[:gears].each do |gear|
+            # since the gear will look like 51e96b5e4f43c070fc000001@s1-agoldste.dev.rhcloud.com
+            # splitting by @ and taking the first element gets the gear's uuid
+            gear_uuid = gear.split('@')[0]
+
+            hot_deploy_option = (options[:hot_deploy] == true) ? '--hot-deploy' : '--no-hot-deploy'
+            init_option = (options[:init] == true) ? '--init' : ''
+
+            puts "Activating child gear #{gear_uuid}, deployment id: #{options[:deployment_id]}, #{hot_deploy_option}, #{init_option}"
+
+            out, err, rc = run_in_container_context("#{::OpenShift::Runtime::ApplicationContainer::GEAR_TO_GEAR_SSH} #{gear} gear activate #{options[:deployment_id]} #{hot_deploy_option} #{init_option}",
+                                                    env: gear_env,
+                                                    expected_exitstatus: 0)
+            # TODO check err, rc
+            buffer << out
+          end
+
+          buffer
+        end
+
+        #
+        # Activates a specific deployment id
+        #
+        # options: hash
+        #   :deployment_id : the id of the deployment to activate (required)
+        #   :init          : if true, run post_install after post-deploy (i.e. for a new gear on scale up)
+        #   :out           : an IO to which any stdout should be written (default: nil)
+        #   :err           : an IO to which any stderr should be written (default: nil)
         #
         def activate(options={})
           deployment_id = options[:deployment_id]
@@ -585,33 +627,6 @@ module OpenShift
                                           out: options[:out],
                                           err: options[:err])
 
-          end
-
-          unless options[:child] or @cartridge_model.web_proxy.nil?
-            #TODO this really should be parallelized
-            if options[:gears]
-              gears = options[:gears]
-            else
-              gears = ::OpenShift::Runtime::GearRegistry.new(self).ssh_urls
-            end
-
-            gears.each do |gear|
-              # since the gear will look like 51e96b5e4f43c070fc000001@s1-agoldste.dev.rhcloud.com
-              # splitting by @ and taking the first element gets the gear's uuid
-              gear_uuid = gear.split('@')[0]
-
-              # skip self
-              next if gear_uuid == @uuid
-
-              puts "Activating child gear #{gear_uuid}"
-
-              out, err, rc = run_in_container_context("#{::OpenShift::Runtime::ApplicationContainer::GEAR_TO_GEAR_SSH} #{gear} gear activate #{deployment_id} --child",
-                                                      env: gear_env,
-                                                      expected_exitstatus: 0)
-              # TODO check err, rc
-              buffer << out
-#              puts out
-            end
           end
 
           write_deployment_metadata(deployment_datetime, 'state', 'DEPLOYED')
