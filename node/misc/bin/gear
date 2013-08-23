@@ -269,10 +269,10 @@ command :rollback do |c|
   c.syntax = "#{name} rollback"
 
   c.description = "Roll back to the previous deployment"
-  c.option "--child", "Indicates that the gear is not a load balancer gear"
   c.action do |args, options|
     do_command(c, options) do
-      puts @container.rollback(out: $stdout, err: $stderr, child: options.child)
+      puts @container.rollback(out: $stdout, err: $stderr)
+      puts @container.rollback_many(out: $stdout, err: $stderr)
     end
   end
 end

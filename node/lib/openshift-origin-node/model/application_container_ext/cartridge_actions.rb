@@ -25,7 +25,6 @@ module OpenShift
         def post_configure(cart_name, template_git_url=nil)
           output = ''
           cartridge = @cartridge_model.get_cartridge(cart_name)
-          cartridge_home = PathUtils.join(@container_dir, cartridge.directory)
 
           # Only perform an initial build if the manifest explicitly specifies a need,
           # or if a template Git URL is provided and the cart is capable of builds or deploys.
@@ -230,6 +229,14 @@ module OpenShift
           end
         end
 
+        def child_gear_ssh_urls
+          if @cartridge_model.web_proxy
+            ::OpenShift::Runtime::GearRegistry.new(self).ssh_urls.reject { |g| g.split('@')[0] == @uuid }
+          else
+            []
+          end
+        end
+
         #
         # Handles the post-receive portion of the Git push lifecycle.
         #
@@ -278,17 +285,15 @@ module OpenShift
 
             prepare(options)
 
-            distribute(options)
+            # if we have children, activate them
+            if @cartridge_model.web_proxy
+              distribute(options)
+
+              activate_many(options)
+            end
 
             # activate the local gear
             activate(options)
-
-            # if we have children, activate them
-            if @cartridge_model.web_proxy
-              # get all gears except self
-              gears = ::OpenShift::Runtime::GearRegistry.new(self).ssh_urls.reject { |g| g.split('@')[0] == @uuid }
-              activate_many(options.merge(gears: gears))
-            end
           end
 
           report_build_analytics
@@ -315,11 +320,6 @@ module OpenShift
                                       post_action_hooks_enabled: false,
                                       out:                       options[:out],
                                       err:                       options[:err])
-
-          gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
-          to_keep = (gear_env['OPENSHIFT_KEEP_DEPLOYMENTS'] || 1).to_i
-
-          #clean_up_deployments_before(current_deployment_datetime)
 
           repo_dir = PathUtils.join(@container_dir, 'app-deployments', options[:deployment_datetime], 'repo')
 
@@ -437,7 +437,7 @@ module OpenShift
           options[:deployment_id] = deployment_id
 
           # create symlink so it's easier to find later by id
-          FileUtils.cd(PathUtils.join(@container_dir, 'app-deployments', 'by-id')) do |d|
+          FileUtils.cd(PathUtils.join(@container_dir, 'app-deployments', 'by-id')) do
             FileUtils.ln_s(PathUtils.join('..', deployment_datetime), deployment_id)
           end
 
@@ -457,7 +457,9 @@ module OpenShift
         # Returns the combined output of all actions as a +String+.
         #
         def distribute(options={})
-          return if @cartridge_model.web_proxy.nil?
+          gears = options[:gears] || child_gear_ssh_urls
+          return if gears.empty?
+
           # TODO error if deployment doesn't exist
 
           deployment_id = options[:deployment_id]
@@ -467,12 +469,6 @@ module OpenShift
 
           buffer = ''
 
-          if options[:gears]
-            gears = options[:gears]
-          else
-            gears = ::OpenShift::Runtime::GearRegistry.new(self).ssh_urls
-          end
-
           gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
 
           #TODO this really should be parallelized
@@ -481,7 +477,6 @@ module OpenShift
             # splitting by @ and taking the first element gets the gear's uuid
             # no need to distribute to self
             gear_uuid = gear.split('@')[0]
-            next if gear_uuid == @uuid
 
             out, err, rc = run_in_container_context("rsync -axvz --rsh=/usr/bin/oo-ssh ./ #{gear}:app-deployments/#{deployment_datetime}/",
                                                     env: gear_env,
@@ -514,21 +509,24 @@ module OpenShift
         #   :gears         : an Array of FQDNs to activate (required)
         #
         def activate_many(options={})
+          gears = options[:gears] || child_gear_ssh_urls
+          return if gears.empty?
+
           gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
           buffer = ''
 
           #TODO this really should be parallelized
-          options[:gears].each do |gear|
+          gears.each do |gear|
             # since the gear will look like 51e96b5e4f43c070fc000001@s1-agoldste.dev.rhcloud.com
             # splitting by @ and taking the first element gets the gear's uuid
             gear_uuid = gear.split('@')[0]
 
             hot_deploy_option = (options[:hot_deploy] == true) ? '--hot-deploy' : '--no-hot-deploy'
-            init_option = (options[:init] == true) ? '--init' : ''
+            init_option = (options[:init] == true) ? ' --init' : ''
 
             puts "Activating child gear #{gear_uuid}, deployment id: #{options[:deployment_id]}, #{hot_deploy_option}, #{init_option}"
 
-            out, err, rc = run_in_container_context("#{::OpenShift::Runtime::ApplicationContainer::GEAR_TO_GEAR_SSH} #{gear} gear activate #{options[:deployment_id]} #{hot_deploy_option} #{init_option}",
+            out, err, rc = run_in_container_context("/usr/bin/oo-ssh #{gear} gear activate #{options[:deployment_id]} #{hot_deploy_option}#{init_option}",
                                                     env: gear_env,
                                                     expected_exitstatus: 0)
             # TODO check err, rc
@@ -636,6 +634,39 @@ module OpenShift
         end
 
         #
+        # Rolls back to the previous deployment for the specified gears
+        #
+        # options: hash
+        #   :out           : an IO to which any stdout should be written (default: nil)
+        #   :err           : an IO to which any stderr should be written (default: nil)
+        #   :gears         : an Array of FQDNs to activate (required)
+        #
+        def rollback_many(options={})
+          gears = options[:gears] || child_gear_ssh_urls
+          return if gears.empty?
+
+          gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
+          buffer = ''
+
+          #TODO this really should be parellelized
+          gears.each do |gear|
+            # since the gear will look like 51e96b5e4f43c070fc000001@s1-agoldste.dev.rhcloud.com
+            # splitting by @ and taking the first element gets the gear's uuid
+            gear_uuid = gear.split('@')[0]
+
+            puts "Rolling back child gear #{gear_uuid}"
+
+            out, err, rc = run_in_container_context("/usr/bin/oo-ssh #{gear} gear rollback",
+                                                    env: gear_env,
+                                                    expected_exitstatus: 0)
+            # TODO check err, rc
+            buffer << out
+          end
+
+          buffer
+        end
+
+        #
         # Rolls back to the previous deployment
         #
         # options: hash
@@ -674,36 +705,6 @@ module OpenShift
 
             # activate (but don't activate children, since invoking rollback will handle that below)
             activate(options.merge(deployment_id: deployment_id, child: true))
-
-            # process all children
-            unless options[:child] or @cartridge_model.web_proxy.nil?
-              gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
-
-              if options[:gears]
-                gears = options[:gears]
-              else
-                gears = ::OpenShift::Runtime::GearRegistry.new(self).ssh_urls
-              end
-
-              #TODO this really should be parellelized
-              gears.each do |gear|
-                # since the gear will look like 51e96b5e4f43c070fc000001@s1-agoldste.dev.rhcloud.com
-                # splitting by @ and taking the first element gets the gear's uuid
-                gear_uuid = gear.split('@')[0]
-
-                # skip self
-                next if gear_uuid == @uuid
-
-                puts "Rolling back child gear #{gear_uuid}"
-
-                out, err, rc = run_in_container_context("#{::OpenShift::Runtime::ApplicationContainer::GEAR_TO_GEAR_SSH} #{gear} gear rollback --child",
-                                                        env: gear_env,
-                                                        expected_exitstatus: 0)
-                # TODO check err, rc
-                #buffer << out
-  #              puts out
-              end
-            end
           else
             #TODO finish
             raise 'error'
