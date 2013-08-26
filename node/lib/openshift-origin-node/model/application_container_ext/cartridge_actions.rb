@@ -414,7 +414,7 @@ module OpenShift
           if options[:file]
             file = PathUtils.join(@container_dir, 'app-archives', options[:file])
             if !File.exist?(file)
-              raise 'TODO'
+              raise "Specified file '#{file}' does not exist."
             end
 
             # explode file
@@ -423,7 +423,6 @@ module OpenShift
                                                     env: env,
                                                     chdir: deployment_dir,
                                                     expected_exitstatus: 0)
-            # TODO check err/rc
           end
 
           buffer = ''
@@ -483,7 +482,6 @@ module OpenShift
                                                     chdir: deployment_dir,
                                                     expected_exitstatus: 0)
 
-            # TODO check err, rc
             buffer << out
 
             # create by-id symlink
@@ -492,7 +490,6 @@ module OpenShift
                                                     chdir: PathUtils.join(@container_dir, 'app-deployments', 'by-id'),
                                                     expected_exitstatus: 0)
 
-            # TODO check err, rc
             buffer << out
           end
 
@@ -524,12 +521,11 @@ module OpenShift
             hot_deploy_option = (options[:hot_deploy] == true) ? '--hot-deploy' : '--no-hot-deploy'
             init_option = (options[:init] == true) ? ' --init' : ''
 
-            puts "Activating child gear #{gear_uuid}, deployment id: #{options[:deployment_id]}, #{hot_deploy_option}, #{init_option}"
+            buffer << "Activating gear #{gear_uuid}, deployment id: #{options[:deployment_id]}, #{hot_deploy_option}, #{init_option}\n"
 
             out, err, rc = run_in_container_context("/usr/bin/oo-ssh #{gear} gear activate #{options[:deployment_id]} #{hot_deploy_option}#{init_option}",
                                                     env: gear_env,
                                                     expected_exitstatus: 0)
-            # TODO check err, rc
             buffer << out
           end
 
@@ -648,18 +644,17 @@ module OpenShift
           gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
           buffer = ''
 
-          #TODO this really should be parellelized
+          #TODO this really should be parallelized
           gears.each do |gear|
             # since the gear will look like 51e96b5e4f43c070fc000001@s1-agoldste.dev.rhcloud.com
             # splitting by @ and taking the first element gets the gear's uuid
             gear_uuid = gear.split('@')[0]
 
-            puts "Rolling back child gear #{gear_uuid}"
+            buffer << "Rolling back gear #{gear_uuid}\n"
 
             out, err, rc = run_in_container_context("/usr/bin/oo-ssh #{gear} gear rollback",
                                                     env: gear_env,
                                                     expected_exitstatus: 0)
-            # TODO check err, rc
             buffer << out
           end
 
@@ -674,6 +669,7 @@ module OpenShift
         #   :err           : an IO to which any stderr should be written (default: nil)
         #
         def rollback(options={})
+          buffer = ''
           deployments_dir = PathUtils.join(@container_dir, 'app-deployments')
 
           current_deployment = latest_deployment_datetime
@@ -681,6 +677,7 @@ module OpenShift
           # get a list of all entries in app-deployments excluding 'by-id' and the current deployment dir
           deployments = Dir["#{deployments_dir}/*"].entries.reject {|e| ['by-id', current_deployment].include?(File.basename(e))}.sort.reverse
 
+          buffer << "Looking up previous deployment\n"
           # make sure we get the latest 'deployed' dir prior to the current one
           previous_deployment = nil
           deployments.each do |d|
@@ -692,23 +689,26 @@ module OpenShift
           end
 
           if previous_deployment
-            # TODO support zero downtime rollbacks
             if state.value == State::STARTED
-              output = stop_gear(options)
+              buffer << "Stopping gear\n"
+              output = stop_gear(options.merge(exclude_web_proxy: true))
               options[:out].puts(output) if options[:out]
             end
 
             # delete current deployment
+            buffer << "Deleting current deployment\n"
             delete_deployment(current_deployment)
 
             deployment_id = read_deployment_metadata(File.basename(previous_deployment), 'id').chomp
 
-            # activate (but don't activate children, since invoking rollback will handle that below)
-            activate(options.merge(deployment_id: deployment_id, child: true))
+            # activate
+            buffer << "Rolling back to deployment ID #{deployment_id}\n"
+            buffer << activate(options.merge(deployment_id: deployment_id))
           else
-            #TODO finish
-            raise 'error'
+            raise 'No prior deployments exist - unable to roll back'
           end
+
+          buffer
         end
 
         # === Cartridge control methods
