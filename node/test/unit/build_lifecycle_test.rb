@@ -636,7 +636,7 @@ class BuildLifecycleTest < OpenShift::NodeTestCase
 
     output = @container.activate_many(deployment_id: deployment_id)
 
-    assert_equal "out from 1234@localhost\nout from 2345@localhost\n", output
+    assert_equal "Activating gear 1234, deployment id: abcd1234, --no-hot-deploy,\nout from 1234@localhost\nActivating gear 2345, deployment id: abcd1234, --no-hot-deploy,\nout from 2345@localhost\n", output
   end
 
   def test_activate_many_uses_specified_gears
@@ -657,7 +657,7 @@ class BuildLifecycleTest < OpenShift::NodeTestCase
 
     output = @container.activate_many(gears: gears, deployment_id: deployment_id)
 
-    assert_equal "out from 1234@localhost\nout from 2345@localhost\n", output
+    assert_equal "Activating gear 1234, deployment id: abcd1234, --no-hot-deploy,\nout from 1234@localhost\nActivating gear 2345, deployment id: abcd1234, --no-hot-deploy,\nout from 2345@localhost\n", output
   end
 
   def test_activate_many_hot_deploy
@@ -678,7 +678,7 @@ class BuildLifecycleTest < OpenShift::NodeTestCase
 
     output = @container.activate_many(gears: gears, deployment_id: deployment_id, hot_deploy: true)
 
-    assert_equal "out from 1234@localhost\nout from 2345@localhost\n", output
+    assert_equal "Activating gear 1234, deployment id: abcd1234, --hot-deploy,\nout from 1234@localhost\nActivating gear 2345, deployment id: abcd1234, --hot-deploy,\nout from 2345@localhost\n", output
   end
 
   def test_activate_many_init
@@ -699,7 +699,7 @@ class BuildLifecycleTest < OpenShift::NodeTestCase
 
     output = @container.activate_many(gears: gears, deployment_id: deployment_id, init: true)
 
-    assert_equal "out from 1234@localhost\nout from 2345@localhost\n", output
+    assert_equal "Activating gear 1234, deployment id: abcd1234, --no-hot-deploy, --init\nout from 1234@localhost\nActivating gear 2345, deployment id: abcd1234, --no-hot-deploy, --init\nout from 2345@localhost\n", output
   end
 
   def test_activate_stops_started_gear
@@ -934,7 +934,7 @@ class BuildLifecycleTest < OpenShift::NodeTestCase
 
     output = @container.rollback_many()
 
-    assert_equal "out from 1234@localhost\nout from 2345@localhost\n", output
+    assert_equal "Rolling back gear 1234\nout from 1234@localhost\nRolling back gear 2345\nout from 2345@localhost\n", output
   end
 
   def test_rollback_many_uses_specified_gears
@@ -953,6 +953,6 @@ class BuildLifecycleTest < OpenShift::NodeTestCase
 
     output = @container.rollback_many(gears: gears)
 
-    assert_equal "out from 1234@localhost\nout from 2345@localhost\n", output
+    assert_equal "Rolling back gear 1234\nout from 1234@localhost\nRolling back gear 2345\nout from 2345@localhost\n", output
   end
 end
