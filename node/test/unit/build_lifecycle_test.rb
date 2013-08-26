@@ -955,4 +955,38 @@ class BuildLifecycleTest < OpenShift::NodeTestCase
 
     assert_equal "Rolling back gear 1234\nout from 1234@localhost\nRolling back gear 2345\nout from 2345@localhost\n", output
   end
+
+  def test_rollback_stops_started_app
+    deployment_id = 'abcd1234'
+    deployment_datetime1 = '2013-08-16_13-36-36.880'
+    deployment_datetime2 = '2013-08-16_14-36-36.880'
+    deployment_datetime3 = '2013-08-16_15-36-36.881'
+    deployments_dir = File.join(@container.container_dir, 'app-deployments')
+    rollback_options = {}
+
+    @container.expects(:latest_deployment_datetime).returns(deployment_datetime3)
+    Dir.expects(:[]).with("#{deployments_dir}/*").returns([deployment_datetime2, deployment_datetime3, deployment_datetime1, 'by-id'])
+    @container.expects(:read_deployment_metadata).with(deployment_datetime2, 'state').returns(nil)
+    @container.expects(:read_deployment_metadata).with(deployment_datetime1, 'state').returns("DEPLOYED\n")
+
+    @container.state.expects(:value).returns(::OpenShift::Runtime::State::STARTED)
+    @container.expects(:stop_gear).with(rollback_options.merge(exclude_web_proxy: true)).returns("stop gear output\n")
+
+    @container.expects(:delete_deployment).with(deployment_datetime3)
+
+    @container.expects(:read_deployment_metadata).with(deployment_datetime1, 'id').returns("a1b2c3d4\n")
+    @container.expects(:activate).with(rollback_options.merge(deployment_id: 'a1b2c3d4')).returns("activate output\n")
+
+    output = @container.rollback()
+    assert_equal "Looking up previous deployment\nStopping gear\nstop gear output\nDeleting current deployment\nRolling back to deployment ID a1b2c3d4\nactivate output\n", output
+  end
+
+  def test_rollback_raises_when_no_previous_deployment_exists
+    deployment_datetime = '2013-08-16_15-36-36.881'
+    @container.expects(:latest_deployment_datetime).returns(deployment_datetime)
+    deployments_dir = File.join(@container.container_dir, 'app-deployments')
+    Dir.expects(:[]).with("#{deployments_dir}/*").returns([deployment_datetime, 'by-id'])
+
+    assert_raises(RuntimeError, 'No prior deployments exist - unable to roll back') { @container.rollback }
+  end
 end

@@ -692,6 +692,7 @@ module OpenShift
             if state.value == State::STARTED
               buffer << "Stopping gear\n"
               output = stop_gear(options.merge(exclude_web_proxy: true))
+              buffer << output
               options[:out].puts(output) if options[:out]
             end
 
