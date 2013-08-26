@@ -401,4 +401,25 @@ class DeploymentsTest < OpenShift::NodeTestCase
 
     assert_equal 'foo', output
   end
+
+  def test_list_deployments
+    deployment_datetime1 = '2013-08-16_13-36-36.880'
+    deployment_datetime2 = '2013-08-16_14-36-36.880'
+    deployment_datetime3 = '2013-08-16_15-36-36.881'
+    @container.expects(:current_deployment_datetime).returns(deployment_datetime3)
+    @container.expects(:all_deployments).returns([deployment_datetime1, deployment_datetime2, deployment_datetime3])
+    @container.expects(:read_deployment_metadata).with(deployment_datetime3, 'id').returns("id3\n")
+    @container.expects(:read_deployment_metadata).with(deployment_datetime3, 'state').returns("DEPLOYED\n")
+    @container.expects(:read_deployment_metadata).with(deployment_datetime2, 'id').returns("id2\n")
+    @container.expects(:read_deployment_metadata).with(deployment_datetime2, 'state').returns(nil)
+    @container.expects(:read_deployment_metadata).with(deployment_datetime1, 'id').returns("id1\n")
+    @container.expects(:read_deployment_metadata).with(deployment_datetime1, 'state').returns("DEPLOYED\n")
+    output = @container.list_deployments
+    expected = <<EOF
+2013-08-16_15-36-36.881 - id3 - DEPLOYED - ACTIVE
+2013-08-16_14-36-36.880 - id2 - NOT DEPLOYED
+2013-08-16_13-36-36.880 - id1 - DEPLOYED
+EOF
+    assert_equal expected.chomp, output
+  end
 end

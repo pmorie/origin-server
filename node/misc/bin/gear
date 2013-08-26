@@ -339,6 +339,16 @@ command :archive do |c|
   end
 end
 
+command :deployments do |c|
+  c.syntax = "#{name} deployments"
+  c.description = "List the gear's deployments"
+  c.action do |args, options|
+    do_command(c, options) do
+      puts @container.list_deployments
+    end
+  end
+end
+
 command :start do |c|
   c.syntax = "#{name} start"
   

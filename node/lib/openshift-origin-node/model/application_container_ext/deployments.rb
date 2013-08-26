@@ -175,6 +175,18 @@ module OpenShift
                                                   expected_exitstatus: 0)
           out
         end
+
+        def list_deployments
+          current = current_deployment_datetime
+
+          all_deployments.reverse.map do |d|
+            deployment_datetime = File.basename(d)
+            deployment_id = (read_deployment_metadata(deployment_datetime, 'id') || '').chomp
+            deployment_state = (read_deployment_metadata(deployment_datetime, 'state') || 'NOT DEPLOYED').chomp
+            active_text = " - ACTIVE" if deployment_datetime == current
+            "#{deployment_datetime} - #{deployment_id} - #{deployment_state}#{active_text}"
+          end.join("\n")
+        end
       end
     end
   end
