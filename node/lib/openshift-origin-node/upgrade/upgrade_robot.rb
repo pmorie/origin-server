@@ -1,7 +1,7 @@
+#!/usr/bin/env oo-ruby
 require 'rubygems'
 require 'json'
-require 'openshift-origin-node/model/upgrade'
-
+require 'stomp'
 
 module OpenShift
   module Runtime
@@ -24,11 +24,10 @@ module OpenShift
           ignore_cartridge_version = content['ignore_cartridge_version']
 
           output = ''
-	      exitcode = 0
+	        exitcode = 0
 
           begin
-            upgrader = OpenShift::Runtime::Upgrader.new(uuid, namespace, target_version, node, ignore_cartridge_version, OpenShift::Runtime::Utils::Hourglass.new(235))
-            result = upgrader.execute
+            result = {} # mock this
           rescue OpenShift::Runtime::Utils::ShellExecutionException => e
             exitcode = 127
             output += "Gear failed to upgrade: #{e.message}\n#{e.stdout}\n#{e.stderr}"
@@ -45,6 +44,7 @@ module OpenShift
           	      }
 
           @client.publish(reply_queue, reply)
+          @client.acknowledge(msg)
         end
 
         loop do
@@ -55,3 +55,11 @@ module OpenShift
     end
   end
 end
+
+url = ARGV[0]
+request_queue = ARGV[1]
+reply_queue = ARGV[2]
+
+File.touch("/tmp/oo-robo/robot.pid.#{$$}")
+
+UpgradeRobot.new(Stomp::Client.new(url), request_queue, reply_queue).execute
