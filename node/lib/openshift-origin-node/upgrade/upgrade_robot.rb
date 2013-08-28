@@ -2,6 +2,7 @@
 require 'rubygems'
 require 'json'
 require 'stomp'
+require 'fileutils'
 
 module OpenShift
   module Runtime
@@ -13,7 +14,7 @@ module OpenShift
       end
 
       def execute
-      	@client.subscribe(queue_name) do |msg|
+      	@client.subscribe(@request_queue) do |msg|
           content = JSON.load(msg)
 
           uuid = content['uuid']
@@ -27,7 +28,7 @@ module OpenShift
 	        exitcode = 0
 
           begin
-            result = {} # mock this
+            result = { upgrade_complete: [true, false].sample }
           rescue OpenShift::Runtime::Utils::ShellExecutionException => e
             exitcode = 127
             output += "Gear failed to upgrade: #{e.message}\n#{e.stdout}\n#{e.stderr}"
@@ -43,7 +44,7 @@ module OpenShift
           	        'upgrade_result_json' => JSON.dump(result)
           	      }
 
-          @client.publish(reply_queue, reply)
+          @client.publish(@reply_queue, JSON.dump(reply), {:persistent => true})
           @client.acknowledge(msg)
         end
 
@@ -56,10 +57,14 @@ module OpenShift
   end
 end
 
-url = ARGV[0]
-request_queue = ARGV[1]
-reply_queue = ARGV[2]
+request_queue = ARGV[0]
+reply_queue = ARGV[1]
 
-File.touch("/tmp/oo-robo/robot.pid.#{$$}")
+if (!request_queue || !reply_queue)
+  puts "upgrade_robot.rb <request_queue> <reply_queue>"
+end
 
-UpgradeRobot.new(Stomp::Client.new(url), request_queue, reply_queue).execute
+FileUtils.touch("/tmp/oo-robo/robot.pid.#{$$}")
+
+opts = { hosts: [ { login: "mcollective", passcode: "marionette", host: '10.147.177.27', port: 6163 } ] }
+::OpenShift::Runtime::UpgradeRobot.new(Stomp::Client.new(opts), request_queue, reply_queue).execute
