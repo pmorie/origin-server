@@ -1134,11 +1134,8 @@ module MCollective
 
         count = request[:count]
 
-        request_queue = "mcollective.upgrade.#{hostname}"
-        reply_queue = 'mcollective.upgrade.replies'
-
         robot_master = create_robot_master
-        reply[:count] = robot_master.scale_to(count)
+        reply[:output] = robot_master.scale_to(count)
       end
 
       def get_workers_action
@@ -1149,11 +1146,12 @@ module MCollective
       end
 
       def create_robot_master
-        hostname, _, _ = ::OpenShift::Runtime::Utils::oo_spawn('hostname')
+        hostname, _, _ = ::OpenShift::Runtime::Utils.oo_spawn('hostname')
+
         request_queue  = "mcollective.upgrade.#{hostname}"
         reply_queue    = 'mcollective.upgrade.replies'
 
-        ::OpenShift::Runtime::RobotMaster.new(hostname, request_queue, reply_queue)
+        ::OpenShift::Runtime::RobotMaster.new(request_queue, reply_queue)
       end
 
       def log_request(request)

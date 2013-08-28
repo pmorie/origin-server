@@ -6,8 +6,7 @@ require 'openshift-origin-node/utils/shell_exec'
 module OpenShift
   module Runtime
   	class RobotMaster
-      def initialize(url, request_queue, reply_queue, path = '/tmp/oo-robo')
-        @url = url
+      def initialize(request_queue, reply_queue, path = '/tmp/oo-robo')
         @request_queue = request_queue
         @reply_queue = reply_queue
         @path = path
