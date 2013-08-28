@@ -47,6 +47,10 @@ module OpenShift
           @client.publish(reply_queue, reply)
           @client.acknowledge(msg)
         end
+
+        loop do
+          sleep 1
+        end
       end
 
     end
