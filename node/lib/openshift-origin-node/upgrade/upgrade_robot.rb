@@ -44,7 +44,7 @@ module OpenShift
             	        'output' => output,
             	        'exitcode' => exitcode,
                       'attempt' => attempt,
-            	        'upgrade_result_json' => JSON.dump(result)
+            	        'gear_upgrader_result' => result
             	      }
 
             @client.publish(@reply_queue, JSON.dump(reply), {:persistent => true})

@@ -93,12 +93,12 @@ module OpenShift
         include Mongoid::Timestamps
 
         field :upgrade_errors, type: Array, default: []
-        field :remote_result, type: Hash
+        field :gear_upgrader_result, type: Hash
 
         embedded_in :gear_machine
 
         def successful?
-          self.upgrade_errors.empty? && self.remote_result && self.remote_result['upgrade_complete']
+          self.upgrade_errors.empty? && self.gear_upgrader_result && self.gear_upgrader_result['upgrade_complete']
         end
 
         def failed?
@@ -128,20 +128,25 @@ module OpenShift
           puts "Remaining machines: #{num_remaining}"
 
           StompClient.instance.subscribe("mcollective.upgrade.results", {:ack => "client" }) do |msg|
-            result = JSON.load(msg.body)
-            gear_uuid = result["uuid"]
+            begin
+              remote_result = JSON.load(msg.body)
+              gear_uuid = remote_result["uuid"]
 
-            gear = GearMachine.find(uuid: gear_uuid)
+              gear = GearMachine.find_by(uuid: gear_uuid)
 
-            if gear
-              result = UpgradeResult.create(remote_result: result['upgrade_result_json'])
-              gear.complete_upgrade(result)
-              puts "Processed reply for gear #{gear_uuid}"
-            else
-              puts "Dropping result for missing gear #{gear_uuid}"
+              if gear
+                result = UpgradeResult.new(gear_upgrader_result: remote_result['gear_upgrader_result'])
+                gear.complete_upgrade(result)
+                puts "Processed reply for gear #{gear_uuid}"
+              else
+                puts "Dropping result for missing gear #{gear_uuid}"
+              end
+
+              StompClient.instance.acknowledge(msg)
+            rescue => e
+              puts e.message
+              puts e.backtrace.join("\n")
             end
-
-            StompClient.instance.acknowledge(msg)
           end
 
           print "Waiting for gear replies..."
