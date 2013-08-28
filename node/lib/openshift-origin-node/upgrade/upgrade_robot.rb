@@ -23,7 +23,7 @@ module OpenShift
           ignore_cartridge_version = content['ignore_cartridge_version']
 
           output = ''
-	      exitcode = 0
+  	      exitcode = 0
 
           begin
             upgrader = OpenShift::Runtime::Upgrader.new(uuid, namespace, version, hostname, ignore_cartridge_version, OpenShift::Runtime::Utils::Hourglass.new(235))
@@ -43,6 +43,7 @@ module OpenShift
           	      }
 
           @client.publish(reply_queue, reply)
+          @client.acknowledge(msg)
         end
       end
 
