@@ -111,4 +111,8 @@ module RestModelHelper
       RestGearGroup.new(group_inst, gear_states, application, get_url, nolinks) 
     end
   end
+  
+  def get_rest_deployment(deployment)
+    RestDeployment.new(deployment)
+  end
 end
