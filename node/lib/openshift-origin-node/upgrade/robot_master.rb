@@ -12,6 +12,10 @@ module OpenShift
         @path = path
       end
 
+      def initialize_store
+        Dir.mkdir('/tmp/oo-robo')
+      end
+
       def scale_to(count)
       	current_count = robot_count
       	workers_to_scale = count - current_count
