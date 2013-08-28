@@ -464,3 +464,25 @@ action "upgrade", :description => "upgrade a gear" do
            :description => "Exit code",
            :display_as => "Exit Code"
 end
+
+action "scale_workers", :description => "Scale the upgrade workers on this node to <N>" do
+    display :always
+
+    input :count,
+        :prompt         => "Worker count",
+        :description    => "Worker count",
+        :type           => :integer,
+        :optional       => false
+
+    output :output,
+           :description => "Output",
+           :display_as  => "Output"
+end
+
+action "get_workers", :description => "Get the current number of workers on this node" do
+    display :always
+
+    output :count,
+           :description => "Count",
+           :display_as  => "Count"
+end
