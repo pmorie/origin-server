@@ -1,17 +1,34 @@
+require 'uuidtools'
+
 module OpenShift
   module Runtime
     module Upgrade
       module ClusterScanner
         def find_gears_to_upgrade
+          nodes = ['ec2-23-20-79-51.compute-1.amazonaws.com',
+                   'ec2-54-235-10-26.compute-1.amazonaws.com',
+                   'ec2-184-73-59-195.compute-1.amazonaws.com',
+                   'ec2-54-211-190-112.compute-1.amazonaws.com']
+
           gears = []
-          (1..5).each do |node_count|
-            (1..10).each do |gear_count|
-              gears << { uuid: "uuid#{node_count}-#{gear_count}", name: "gear#{node_count}-#{gear_count}",
-                         app_name: "app#{node_count}-#{gear_count}", node: "node#{node_count}",
-                         login: "login#{node_count}-#{gear_count}", active: [true, false].sample }
+          gear_count = 0
+
+          nodes.each do |node|
+            (1..10).each do
+              gear_count += 1
+              gears << { uuid: UUIDTools::UUID.random_create.to_s.delete('-'),
+                         name: "gear#{gear_count}",
+                         namespace: "namespace#{gear_count}",
+                         app_name: "app#{gear_count}",
+                         node: node,
+                         login: "login#{gear_count}",
+                         active: [true, false].sample
+                       }
             end
           end
-          puts "synthesized #{gears.length} gears"
+
+          puts "mocked #{gear_count} gears across #{nodes.length} nodes"
+
           gears
         end
 
@@ -77,7 +94,7 @@ module OpenShift
                 server_identity = gear['server_identity']
                 all_gears << { uuid: gear['uuid'], name: gear['name'], app_name: gear['app_name'],
                                 node: server_identity, login: user_login,
-                                active: active_gears_map.include?(server_identity) }
+                                active: active_gears_map.include?(server_identity), namespace: app.domain.namespace }
               end
             end
           end

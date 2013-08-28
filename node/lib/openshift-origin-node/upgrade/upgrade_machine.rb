@@ -40,6 +40,7 @@ module OpenShift
 
         field :uuid, type: String
         field :node, type: String
+        field :namespace, type: String
         field :target_version, type: String
         field :active, type: Boolean, default: true
         field :num_attempts, type: Integer, default: 0
@@ -63,11 +64,20 @@ module OpenShift
         end
 
         def queue_upgrade
-          puts "queueing upgrade for #{self.uuid} [#{self.active ? 'active' : 'inactive'}] (attempt #{self.num_attempts + 1} of #{self.max_attempts})"
-          
-          StompClient.instance.publish "mcollective.upgrade.node.#{self.node}", JSON.dump(msg)
-
           self.num_attempts += 1
+
+          puts "queueing upgrade for #{self.uuid} [#{self.active ? 'active' : 'inactive'}] (attempt #{self.num_attempts} of #{self.max_attempts})"
+          
+          msg = {
+            uuid: self.uuid,
+            namespace: self.namespace,
+            node: self.node,
+            ignore_cartridge_version: true,
+            target_version: self.target_version,
+            attempt: self.num_attempts
+          }
+
+          StompClient.instance.publish "mcollective.upgrade.node.#{self.node}", JSON.dump(msg)
         end
 
         def complete_upgrade(result = nil, *args)
@@ -118,13 +128,13 @@ module OpenShift
           puts "Remaining machines: #{num_remaining}"
 
           StompClient.instance.subscribe("mcollective.upgrade.results", {:ack => "client" }) do |msg|
-            remote_result = JSON.load(msg)
-            gear_uuid = remote_result["gear_uuid"]
+            result = JSON.load(msg)
+            gear_uuid = result["uuid"]
 
             gear = GearMachine.find(uuid: gear_uuid)
 
             if gear
-              result = UpgradeResult.create(remote_result: remote_result)
+              result = UpgradeResult.create(remote_result: result['upgrade_result_json'])
               gear.complete_upgrade(result)
               puts "Processed reply for gear #{gear_uuid}"
             else
@@ -157,7 +167,7 @@ module OpenShift
 
             find_gears_to_upgrade.each do |gear|
               execution.gear_machines << GearMachine.create(uuid: gear[:uuid], node: gear[:node], target_version: target_version, 
-                max_attempts: max_attempts, active: gear[:active])
+                max_attempts: max_attempts, active: gear[:active], namespace: gear[:namespace])
             end
           end
 

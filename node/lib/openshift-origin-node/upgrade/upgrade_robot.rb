@@ -1,9 +1,7 @@
-#!/usr/bin/env oo-ruby
-
 require 'rubygems'
 require 'json'
-require 'stomp'
 require 'openshift-origin-node/model/upgrade'
+
 
 module OpenShift
   module Runtime
@@ -20,15 +18,16 @@ module OpenShift
 
           uuid = content['uuid']
           namespace = content['namespace']
-          version = content['version']
-          hostname = content['hostname']
+          target_version = content['target_version']
+          node = content['node']
+          attempt = content['attempt']
           ignore_cartridge_version = content['ignore_cartridge_version']
 
           output = ''
-  	      exitcode = 0
+	      exitcode = 0
 
           begin
-            upgrader = OpenShift::Runtime::Upgrader.new(uuid, namespace, version, hostname, ignore_cartridge_version, OpenShift::Runtime::Utils::Hourglass.new(235))
+            upgrader = OpenShift::Runtime::Upgrader.new(uuid, namespace, target_version, node, ignore_cartridge_version, OpenShift::Runtime::Utils::Hourglass.new(235))
             result = upgrader.execute
           rescue OpenShift::Runtime::Utils::ShellExecutionException => e
             exitcode = 127
@@ -39,24 +38,16 @@ module OpenShift
           end
 
           reply = { 'uuid' => uuid,
-          	        'output' => output, 
-          	        'exitcode' => exitcode, 
-          	        'upgrade_result_json' => JSON.dump(result) 
+          	        'output' => output,
+          	        'exitcode' => exitcode,
+                    'attempt' => attempt,
+          	        'upgrade_result_json' => JSON.dump(result)
           	      }
 
           @client.publish(reply_queue, reply)
-          @client.acknowledge(msg)
         end
       end
 
     end
   end
 end
-
-url = ARGV[0]
-request_queue = ARGV[1]
-reply_queue = ARGV[2]
-
-File.touch("/tmp/oo-robo/robot.pid.#{$$}")
-
-UpgradeRobot.new(Stomp::Client.new(url), request_queue, reply_queue).execute
