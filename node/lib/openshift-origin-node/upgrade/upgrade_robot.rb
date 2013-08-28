@@ -14,38 +14,45 @@ module OpenShift
       end
 
       def execute
-      	@client.subscribe(@request_queue) do |msg|
-          content = JSON.load(msg)
-
-          uuid = content['uuid']
-          namespace = content['namespace']
-          target_version = content['target_version']
-          node = content['node']
-          attempt = content['attempt']
-          ignore_cartridge_version = content['ignore_cartridge_version']
-
-          output = ''
-	        exitcode = 0
+      	@client.subscribe(@request_queue, {:ack => "client" }) do |msg|
+          puts "Processing message; will reply on #{@reply_queue}"
 
           begin
-            result = { upgrade_complete: [true, false].sample }
-          rescue OpenShift::Runtime::Utils::ShellExecutionException => e
-            exitcode = 127
-            output += "Gear failed to upgrade: #{e.message}\n#{e.stdout}\n#{e.stderr}"
-          rescue Exception => e
-            exitcode = 1
-            output += "Gear failed to upgrade with exception: #{e.message}\n#{e.backtrace}\n"
+            content = JSON.load(msg.body)
+
+            uuid = content['uuid']
+            namespace = content['namespace']
+            target_version = content['target_version']
+            node = content['node']
+            attempt = content['attempt']
+            ignore_cartridge_version = content['ignore_cartridge_version']
+
+            output = ''
+  	        exitcode = 0
+
+            begin
+              result = { upgrade_complete: [true, false].sample }
+            rescue OpenShift::Runtime::Utils::ShellExecutionException => e
+              exitcode = 127
+              output += "Gear failed to upgrade: #{e.message}\n#{e.stdout}\n#{e.stderr}"
+            rescue Exception => e
+              exitcode = 1
+              output += "Gear failed to upgrade with exception: #{e.message}\n#{e.backtrace}\n"
+            end
+
+            reply = { 'uuid' => uuid,
+            	        'output' => output,
+            	        'exitcode' => exitcode,
+                      'attempt' => attempt,
+            	        'upgrade_result_json' => JSON.dump(result)
+            	      }
+
+            @client.publish(@reply_queue, JSON.dump(reply), {:persistent => true})
+            @client.acknowledge(msg)
+          rescue => e
+            puts e.message
+            puts e.backtrace.join("\n")
           end
-
-          reply = { 'uuid' => uuid,
-          	        'output' => output,
-          	        'exitcode' => exitcode,
-                    'attempt' => attempt,
-          	        'upgrade_result_json' => JSON.dump(result)
-          	      }
-
-          @client.publish(@reply_queue, JSON.dump(reply), {:persistent => true})
-          @client.acknowledge(msg)
         end
 
         loop do

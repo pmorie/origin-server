@@ -128,7 +128,7 @@ module OpenShift
           puts "Remaining machines: #{num_remaining}"
 
           StompClient.instance.subscribe("mcollective.upgrade.results", {:ack => "client" }) do |msg|
-            result = JSON.load(msg)
+            result = JSON.load(msg.body)
             gear_uuid = result["uuid"]
 
             gear = GearMachine.find(uuid: gear_uuid)
