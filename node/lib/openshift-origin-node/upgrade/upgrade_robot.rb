@@ -1,7 +1,9 @@
+#!/usr/bin/env oo-ruby
+
 require 'rubygems'
 require 'json'
+require 'stomp'
 require 'openshift-origin-node/model/upgrade'
-
 
 module OpenShift
   module Runtime
@@ -23,7 +25,7 @@ module OpenShift
           ignore_cartridge_version = content['ignore_cartridge_version']
 
           output = ''
-	      exitcode = 0
+  	      exitcode = 0
 
           begin
             upgrader = OpenShift::Runtime::Upgrader.new(uuid, namespace, version, hostname, ignore_cartridge_version, OpenShift::Runtime::Utils::Hourglass.new(235))
@@ -43,9 +45,18 @@ module OpenShift
           	      }
 
           @client.publish(reply_queue, reply)
+          @client.acknowledge(msg)
         end
       end
 
     end
   end
 end
+
+url = ARGV[0]
+request_queue = ARGV[1]
+reply_queue = ARGV[2]
+
+File.touch("/tmp/oo-robo/robot.pid.#{$$}")
+
+UpgradeRobot.new(Stomp::Client.new(url), request_queue, reply_queue).execute
