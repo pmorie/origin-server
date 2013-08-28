@@ -1147,10 +1147,10 @@ module MCollective
 
       def create_robot_master
         hostname      = ::OpenShift::Config.new.get('PUBLIC_HOSTNAME') 
-        request_queue = "mcollective.upgrade.#{hostname}"
-        reply_queue   = 'mcollective.upgrade.replies'
+        request_queue = "/queue/mcollective.upgrade.node.#{hostname}"
+        reply_queue   = '/queue/mcollective.upgrade.results'
 
-        ::OpenShift::Runtime::RobotMaster.new(request_queue, reply_queue)
+        master = ::OpenShift::Runtime::RobotMaster.new(request_queue, reply_queue)
       end
 
       def log_request(request)
