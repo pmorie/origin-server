@@ -6,6 +6,7 @@ require 'zlib'
 require 'base64'
 require 'openshift-origin-node'
 require 'openshift-origin-node/model/cartridge_repository'
+require 'openshift-origin-node/upgrade/robot_master'
 require 'openshift-origin-node/utils/hourglass'
 require 'openshift-origin-common/utils/path_utils'
 require 'shellwords'
@@ -1137,13 +1138,14 @@ module MCollective
         reply_queue = 'mcollective.upgrade.replies'
 
         robot_master = create_robot_master
-        reply[:output] = robot_master.scale_to(count)
+        reply[:count] = robot_master.scale_to(count)
       end
 
       def get_workers_action
         log_request(request)
 
-        reply[:output] = robot_master.robot_count
+        robot_master = create_robot_master
+        reply[:count] = robot_master.robot_count
       end
 
       def create_robot_master
@@ -1151,7 +1153,7 @@ module MCollective
         request_queue  = "mcollective.upgrade.#{hostname}"
         reply_queue    = 'mcollective.upgrade.replies'
 
-        ::OpenShift::Runtime::RobotMaster.new(url, request_queue, reply_queue)
+        ::OpenShift::Runtime::RobotMaster.new(hostname, request_queue, reply_queue)
       end
 
       def log_request(request)
