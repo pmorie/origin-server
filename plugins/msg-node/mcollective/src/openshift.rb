@@ -1100,7 +1100,7 @@ module MCollective
 
       ## Perform operation on CartridgeRepository
       def cartridge_repository_action
-        Log.instance.info("action: #{request.action}_action, agent=#{request.agent}, data=#{request.data.pretty_inspect}")
+        log_request(request)
         action            = request[:action]
         path              = request[:path]
         name              = request[:name]
@@ -1126,6 +1126,36 @@ module MCollective
           Log.instance.info("cartridge_repository_action(#{action}): failed #{e.message}\n#{e.backtrace}")
           reply.fail!("#{action} failed for #{path} #{e.message}", 4)
         end
+      end
+
+      def scale_workers_action
+        log_request(request)
+
+        count = request[:count]
+
+        request_queue = "mcollective.upgrade.#{hostname}"
+        reply_queue = 'mcollective.upgrade.replies'
+
+        robot_master = create_robot_master
+        reply[:output] = robot_master.scale_to(count)
+      end
+
+      def get_workers_action
+        log_request(request)
+
+        reply[:output] = robot_master.robot_count
+      end
+
+      def create_robot_master
+        hostname, _, _ = ::OpenShift::Runtime::Utils::oo_spawn('hostname')
+        request_queue  = "mcollective.upgrade.#{hostname}"
+        reply_queue    = 'mcollective.upgrade.replies'
+
+        ::OpenShift::Runtime::RobotMaster.new(url, request_queue, reply_queue)
+      end
+
+      def log_request(request)
+        Log.instance.info("action: #{request.action}_action, agent=#{request.agent}, data=#{request.data.pretty_inspect}")
       end
     end
   end

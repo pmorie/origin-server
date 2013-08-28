@@ -1,7 +1,9 @@
+#!/usr/bin/env oo-ruby
+
 require 'rubygems'
 require 'json'
+require 'stomp'
 require 'openshift-origin-node/model/upgrade'
-
 
 module OpenShift
   module Runtime
@@ -50,3 +52,11 @@ module OpenShift
     end
   end
 end
+
+url = ARGV[0]
+request_queue = ARGV[1]
+reply_queue = ARGV[2]
+
+File.touch("/tmp/oo-robo/robot.pid.#{$$}")
+
+UpgradeRobot.new(Stomp::Client.new(url), request_queue, reply_queue).execute
