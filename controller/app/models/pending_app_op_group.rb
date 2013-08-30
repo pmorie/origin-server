@@ -349,6 +349,8 @@ class PendingAppOpGroup
             OpenShift::RoutingService.notify_create_application application
           when :notify_app_delete
             OpenShift::RoutingService.notify_delete_application application
+          when :update_cluster
+            application.update_cluster
           end
 
           if use_parallel_job 
