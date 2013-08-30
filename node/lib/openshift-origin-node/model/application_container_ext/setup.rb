@@ -119,6 +119,7 @@ module OpenShift
             FileUtils.cd gearappdir do |d|
               FileUtils.ln_s("runtime/repo", "repo", :verbose => @debug)
               FileUtils.ln_s("runtime/dependencies", "dependencies", :verbose => @debug)
+              FileUtils.ln_s("runtime/build-dependencies", "build-dependencies", :verbose => @debug)
             end
             FileUtils.cd PathUtils.join(gearappdir, "runtime") do |d|
               FileUtils.ln_s("../data", "data", :verbose => @debug)
@@ -137,7 +138,7 @@ module OpenShift
           }
 
           # Change symlink ownership
-          PathUtils.oo_lchown(uid, gid, "#{gearappdir}/repo", "#{gearappdir}/dependencies")
+          PathUtils.oo_lchown(uid, gid, "#{gearappdir}/repo", "#{gearappdir}/dependencies", "#{gearappdir}/build-dependencies")
 
           set_ro_permission(gearappdir)
           raise "Failed to instantiate gear: missing application directory (#{gearappdir})" unless File.exist?(gearappdir)
