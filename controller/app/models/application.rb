@@ -66,6 +66,9 @@ class Application
   # Numeric representation for unlimited scaling
   MAX_SCALE = -1
 
+  # Available deployment types
+  DEPLOYMENT_TYPES = ['git', 'binary']
+
   # This is the current regex for validations for new applications
   APP_NAME_REGEX = /\A[A-Za-z0-9]+\z/
   def self.check_name!(name)
@@ -97,6 +100,7 @@ class Application
   field :ha, type: Boolean, default: false
   field :init_git_url, type: String, default: ""
   field :analytics, type: Hash, default: {}
+  field :config, type: Hash, default: {'auto_deploy' => true, 'deployment_branch' => 'master', 'keep_deployments' => 1, 'deployment_type' => 'git'}
   embeds_many :component_instances, class_name: ComponentInstance.name
   embeds_many :group_instances, class_name: GroupInstance.name
   embeds_many :app_ssh_keys, class_name: ApplicationSshKey.name
@@ -104,6 +108,8 @@ class Application
   embeds_many :deployments, class_name: Deployment.name
 
   has_members through: :domain, default_role: :admin
+
+  validates :config, presence: true, application_config: true
 
   index({'group_instances.gears.uuid' => 1}, {:unique => true, :sparse => true})
   index({'domain_id' => 1})
@@ -352,6 +358,19 @@ class Application
     Application.run_in_application_lock(self) do
       return unless user_id.nil? || Ability.has_permission?(user_id, :ssh_to_gears, Application, role_for(user_id), self)
       op_group = PendingAppOpGroup.new(op_type: :update_configuration, args: {"remove_keys_attrs" => keys_attrs}, parent_op: parent_op, user_agent: self.user_agent)
+      self.pending_op_groups.push op_group
+      result_io = ResultIO.new
+      self.run_jobs(result_io)
+      result_io
+    end
+  end
+
+  ##
+  # Updates the configuration of the application.
+  # @return [ResultIO] Output from cartridges
+  def update_configuration(parent_op=nil)
+    Application.run_in_application_lock(self) do
+      op_group = PendingAppOpGroup.new(op_type: :update_configuration,  args: {"config" => self.config})
       self.pending_op_groups.push op_group
       result_io = ResultIO.new
       self.run_jobs(result_io)
@@ -1617,7 +1636,7 @@ class Application
   def calculate_update_existing_configuration_ops(args, prereqs={})
     ops = []
 
-    if (args.has_key?("add_keys_attrs") or args.has_key?("remove_keys_attrs") or args.has_key?("add_env_vars") or args.has_key?("remove_env_vars"))
+    if (args.has_key?("add_keys_attrs") or args.has_key?("remove_keys_attrs") or args.has_key?("add_env_vars") or args.has_key?("remove_env_vars") or args.has_key?("config"))
       self.group_instances.each do |group_instance|
         args["group_instance_id"] = group_instance._id.to_s
         group_instance.gears.each do |gear|
