@@ -85,6 +85,8 @@ action "cartridge_do", :description => "run a cartridge action" do
                               unsubscribe
                               update-cluster
                               update-configuration
+                              deploy
+                              rollback
                               ),
         :optional       => false,
         :maxlength      => 64
@@ -187,7 +189,7 @@ action "set_district", :description => "run a cartridge action" do
         :validation     => '^[a-zA-Z0-9]+$',
         :optional       => false,
         :maxlength      => 32
-        
+
     input :active,
         :prompt         => "District active boolean",
         :description    => "District active boolean",
@@ -430,7 +432,7 @@ action "upgrade", :description => "upgrade a gear" do
         :validation     => '^[a-zA-Z0-9]+$',
         :optional       => false,
         :maxlength      => 32
-                
+
     input :namespace,
         :prompt         => "Namespace",
         :description    => "Namespace",
