@@ -1441,7 +1441,7 @@ class Application
             self.group_instances.each do |group_instance|
               if group_instance.gears.where(app_dns: true).count > 0
                 gear = group_instance.gears.find_by(app_dns: true)
-                op_group.pending_ops.push PendingAppOp.new(op_type: :deploy, args: {"group_instance_id" => group_instance._id.to_s, "gear_id" => gear.id.to_s, 'hot_deploy' => op_group.args[:hot_deploy], 'force_clean_build' => op_group.args[:force_clean_build], 'branch' => op_group.args[:branch], 'git_commit_id' => op_group.args[:git_commit_id], 'git_tag' => op_group.args[:git_tag], 'artifact_url' => op_group.args[:artifact_url]})
+                op_group.pending_ops.push PendingAppOp.new(op_type: :deploy, args: {"group_instance_id" => group_instance._id.to_s, "gear_id" => gear.id.to_s, 'hot_deploy' => op_group.args[:hot_deploy], 'force_clean_build' => op_group.args[:force_clean_build], 'ref' => op_group.args[:ref], 'artifact_url' => op_group.args[:artifact_url]})
                 break
               end
             end
@@ -3018,7 +3018,7 @@ class Application
   def deploy(deployment)
     result_io = ResultIO.new
     Application.run_in_application_lock(self) do
-      op_group = PendingAppOpGroup.new(op_type: :deploy,  args: {:hot_deploy => deployment.hot_deploy, :force_clean_build => deployment.force_clean_build, :branch => deployment.git_branch, :git_commit_id => deployment.git_commit_id, :git_tag => deployment.git_tag, :artifact_url => deployment.artifact_url})
+      op_group = PendingAppOpGroup.new(op_type: :deploy,  args: {:hot_deploy => deployment.hot_deploy, :force_clean_build => deployment.force_clean_build, :ref => deployment.ref, :artifact_url => deployment.artifact_url})
       self.pending_op_groups.push op_group
       self.run_jobs(result_io)
 
