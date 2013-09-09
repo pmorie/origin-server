@@ -292,6 +292,10 @@ class PendingAppOpGroup
             tag = { "op_id" => op._id.to_s }
             gear.update_configuration(op.args,handle,tag)
             use_parallel_job = true
+          when :deploy
+            result_io.append gear.deploy(op.args["hot_deploy"], op.args["force_clean_build"], op.args["branch"], op.args["git_commit_id"], op.args["git_tag"], op.args["artifact_url"])
+          when :rollback
+            result_io.append gear.rollback(op.args["deployment_id"])
           when :add_broker_auth_key 
             tag = { "op_id" => op._id.to_s }
             job = gear.get_broker_auth_key_add_job(args["iv"], args["token"])

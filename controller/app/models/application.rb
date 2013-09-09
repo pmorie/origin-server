@@ -1371,8 +1371,8 @@ class Application
         Application.where(_id: self._id).update_all({ "$push" => { pending_op_groups: pending_op.serializable_hash_with_timestamp } })
       when "NOTIFY_ENDPOINT_CREATE"
         if gear and component_id
-          pi = PortInterface.create_port_interface(gear, component_id, *command_item[:args]) 
-	  gear.port_interfaces.push(pi)
+          pi = PortInterface.create_port_interface(gear, component_id, *command_item[:args])
+          gear.port_interfaces.push(pi)
           pi.publish_endpoint(self) if self.ha
         end
         # OpenShift::RoutingService.notify_create_public_endpoint self, *command_item[:args]
@@ -1435,6 +1435,22 @@ class Application
           when :update_configuration
             ops = calculate_update_existing_configuration_ops(op_group.args)
             op_group.pending_ops.push(*ops)
+          when :deploy
+            self.group_instances.each do |group_instance|
+              if group_instance.gears.where(app_dns: true).count > 0
+                gear = group_instance.gears.find_by(app_dns: true)
+                op_group.pending_ops.push PendingAppOp.new(op_type: :deploy, args: {"group_instance_id" => group_instance._id.to_s, "gear_id" => gear.id.to_s, 'hot_deploy' => op_group.args[:hot_deploy], 'force_clean_build' => op_group.args[:force_clean_build], 'branch' => op_group.args[:branch], 'git_commit_id' => op_group.args[:git_commit_id], 'git_tag' => op_group.args[:git_tag], 'artifact_url' => op_group.args[:artifact_url]})
+                break
+              end
+            end
+          when :rollback
+            self.group_instances.each do |group_instance|
+              if group_instance.gears.where(app_dns: true).count > 0
+                gear = group_instance.gears.find_by(app_dns: true)
+                op_group.pending_ops.push PendingAppOp.new(op_type: :rollback, args: {"group_instance_id" => group_instance._id.to_s, "gear_id" => gear.id.to_s, "deployment_id" => op_group.args[:deployment_id]} )
+                break
+              end
+            end
           when :add_features
             #need rollback
             features = self.requires + op_group.args["features"]
@@ -1451,16 +1467,16 @@ class Application
           when :make_ha
             self.group_instances.each { |gi|
               gi.gears.each { |gear|
-	        op_group.pending_ops.push PendingAppOp.new(op_type: :publish_routing_info, args: {"group_instance_id" => gi._id.to_s, "gear_id" => gear._id.to_s} )
+                op_group.pending_ops.push PendingAppOp.new(op_type: :publish_routing_info, args: {"group_instance_id" => gi._id.to_s, "gear_id" => gear._id.to_s} )
               }
             }
             op_group.pending_ops.push PendingAppOp.new(op_type: :register_routing_dns, args: { })
           when :update_component_limits
             updated_overrides = (self.group_overrides || []).deep_dup
             ci = self.component_instances.find_by(cartridge_name: op_group.args["comp_spec"]["cart"], component_name: op_group.args["comp_spec"]["comp"])
-	    found = updated_overrides.find {|go| 
-	      go["components"].find { |go_comp_spec| ci.cartridge_name==go_comp_spec["cart"] and ci.component_name==go_comp_spec["comp"] }
-	    }
+            found = updated_overrides.find {|go|
+              go["components"].find { |go_comp_spec| ci.cartridge_name==go_comp_spec["cart"] and ci.component_name==go_comp_spec["comp"] }
+            }
             if ci.is_sparse?
               if found
                 updated_overrides.each { |go|
@@ -2996,29 +3012,36 @@ class Application
       end
     end
   end
-  
-  def add_deployment(deployment)
+
+  def deploy(deployment)
     result_io = ResultIO.new
     Application.run_in_application_lock(self) do
-      #TODO call node instead of saving to Mongo
+      op_group = PendingAppOpGroup.new(op_type: :deploy,  args: {:hot_deploy => deployment.hot_deploy, :force_clean_build => deployment.force_clean_build, :branch => deployment.git_branch, :git_commit_id => deployment.git_commit_id, :git_tag => deployment.git_tag, :artifact_url => deployment.artifact_url})
+      self.pending_op_groups.push op_group
+      self.run_jobs(result_io)
+
+      #TODO Get values from the result
       deployment.id = rand(100)
       self.deployments.push(deployment)
+      result_io
     end
     return result_io, deployment.id
   end
-  
-  def roll_back(deployment_id)
+
+  def rollback(deployment_id)
     result_io = ResultIO.new
     Application.run_in_application_lock(self) do
-    #TODO call node 
+      op_group = PendingAppOpGroup.new(op_type: :rollback,  args: {:deployment_id => deployment_id})
+      self.pending_op_groups.push op_group
+      self.run_jobs(result_io)
     end
     return result_io
   end
-  
+
   def refresh_deployments()
     #TODO call node to get the latest deployments
   end
-  
+
   def update_deployments(deployments)
     Application.run_in_application_lock(self) do
       self.deployments = deployments
