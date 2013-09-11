@@ -8,9 +8,10 @@ require 'openshift-origin-node'
 require 'openshift-origin-node/model/cartridge_repository'
 require 'openshift-origin-node/utils/hourglass'
 require 'openshift-origin-common/utils/path_utils'
+require 'openshift-origin-common/utils/file_needs_sync'
 require 'shellwords'
 require 'facter'
-require 'openshift-origin-common/utils/file_needs_sync'
+require 'stringio'
 
 module MCollective
   module Agent
@@ -275,7 +276,7 @@ module MCollective
         rescue Exception => e
           Log.instance.error e.message
           Log.instance.error e.backtrace.join("\n")
-          return -1, e.message
+          return 1, e.message
         end
       end
 
@@ -295,7 +296,7 @@ module MCollective
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
-          return -1, e.message
+          return 1, e.message
         else
           return 0, output
         end
@@ -310,7 +311,7 @@ module MCollective
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
-          return -1, e.message
+          return 1, e.message
         else
           output << out
           output << err
@@ -338,14 +339,44 @@ module MCollective
         force_clean_build = args['--with-force-clean-build']
         ref = args['--with-ref']
         artifact_url = args['--with-artifact-url']
+        out = StringIO.new
+        err = StringIO.new
 
-        container.deploy(hot_deploy: hot_deploy, force_clean_build: force_clean_build, ref: ref, artifact_url: artifact_url)
+        begin
+          with_container_from_args(args) do |container|
+            container.deploy(hot_deploy: hot_deploy, force_clean_build: force_clean_build, ref: ref, artifact_url: artifact_url, out: out, err: err)
+          end
+        rescue Exception => e
+          Log.instance.info e.message
+          Log.instance.info e.backtrace
+          return 1, e.message
+        else
+          output = ''
+          output << out.string
+          output << err.string
+          return 0, output
+        end
       end
 
       def oo_rollback(args)
         deployment_id  = args['--with-deployment-id']
+        out = StringIO.new
+        err = StringIO.new
 
-        container.rollback(deployment_id: deployment_id)
+        begin
+          with_container_from_args(args) do |container|
+            container.rollback(deployment_id: deployment_id, out: out, err: err)
+          end
+        rescue Exception => e
+          Log.instance.info e.message
+          Log.instance.info e.backtrace
+          return 1, e.message
+        else
+          output = ''
+          output << out.string
+          output << err.string
+          return 0, output
+        end
       end
 
       def oo_authorized_ssh_key_add(args)
@@ -376,7 +407,7 @@ module MCollective
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
-          return -1, e.message
+          return 1, e.message
         else
           return 0, ""
         end
@@ -457,7 +488,7 @@ module MCollective
           output    = 'CLIENT_RESULT: ' + list.to_json
         rescue Exception => e
           Log.instance.info "#{e.message}\n#{e.backtrace}"
-          return -1, e.message
+          return 1, e.message
         else
           return 0, output
         end
@@ -473,7 +504,7 @@ module MCollective
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
-          return -1, e.message
+          return 1, e.message
         else
           return 0, output
         end
@@ -502,7 +533,7 @@ module MCollective
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
-          return -1, e.message
+          return 1, e.message
         else
           return 0, output
         end
@@ -519,7 +550,7 @@ module MCollective
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
-          return -1, e.message
+          return 1, e.message
         else
           return 0, output
         end
@@ -554,7 +585,7 @@ module MCollective
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
-          return -1, e.message
+          return 1, e.message
         else
           return 0, output
         end
@@ -838,7 +869,7 @@ module MCollective
         rescue Exception => e
           Log.instance.info e.message
           Log.instance.info e.backtrace
-          return -1, e.message
+          return 1, e.message
         else
           return 0, output
         end
@@ -896,7 +927,7 @@ module MCollective
           return e.rc, "CLIENT_ERROR: action 'threaddump' failed #{e.message} #{e.stderr}"
         rescue Exception => e
           Log.instance.info "#{e.message}\n#{e.backtrace}"
-          return -1, e.message
+          return 1, e.message
         else
           return 0, output
         end
