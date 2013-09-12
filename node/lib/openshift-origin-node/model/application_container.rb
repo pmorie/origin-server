@@ -463,32 +463,21 @@ module OpenShift
         app_name = gear_env['OPENSHIFT_APP_NAME']
         url = "https://#{broker_addr}/broker/rest/domains/#{domain}/applications/#{app_name}/gear_groups.json"
 
-        params = {
-          'broker_auth_key' => File.read(PathUtils.join(@config.get('GEAR_BASE_DIR'), uuid, '.auth', 'token')).chomp,
-          'broker_auth_iv' => File.read(PathUtils.join(@config.get('GEAR_BASE_DIR'), uuid, '.auth', 'iv')).chomp
-        }
+        params = broker_auth_params
 
         request = RestClient::Request.new(:method => :get,
                                           :url => url,
-                                          :timeout => 120,
+                                          :timeout => 30,
                                           :headers => { :accept => 'application/json;version=1.0', :user_agent => 'OpenShift' },
                                           :payload => params)
 
-        begin
-          response = request.execute()
+        response = request.execute
 
-          if 300 <= response.code
-            raise response
-          end
-        rescue
-          raise
+        if 300 <= response.code
+          raise response
         end
 
-        begin
-          gear_groups = JSON.parse(response)
-        rescue
-          raise
-        end
+        gear_groups = JSON.parse(response)
 
         gear_groups
       end
@@ -509,6 +498,42 @@ module OpenShift
         end
 
         secondary_groups
+      end
+
+      ##
+      # Send the deployments to the broker
+      #
+      def report_deployments(gear_env)
+        broker_addr = @config.get('BROKER_HOST')
+        domain = gear_env['OPENSHIFT_NAMESPACE']
+        app_name = gear_env['OPENSHIFT_APP_NAME']
+        app_uuid = gear_env['OPENSHIFT_APP_UUID']
+        url = "https://#{broker_addr}/broker/rest/domains/#{domain}/applications/#{app_name}/deployments"
+
+        params = broker_auth_params
+        if params
+          deployments = []
+          all_deployments.each do |d|
+            deployment_datetime = File.basename(d)
+            deployment_state = (read_deployment_metadata(deployment_datetime, 'state') || 'NOT DEPLOYED').chomp
+            deployment_id = (read_deployment_metadata(deployment_datetime, 'id') || '').chomp
+            deployments.push({:id => deployment_id, :ref => "TODO", :state => deployment_state, :created_at => deployment_datetime})
+          end
+          params['deployments[]'] = deployments
+          params[:application_id] = app_uuid
+
+          request = RestClient::Request.new(:method => :post,
+                                            :url => url,
+                                            :timeout => 30,
+                                            :headers => { :accept => 'application/json;version=1.0', :user_agent => 'OpenShift' },
+                                            :payload => params)
+
+          response = request.execute
+
+          if 300 <= response.code
+            raise response
+          end
+        end
       end
 
       def stopped_status_attr
@@ -677,6 +702,23 @@ module OpenShift
 
       def set_rw_permission(paths)
         @container_plugin.set_rw_permission(paths)
+      end
+
+
+      protected
+
+      def broker_auth_params
+        auth_token = PathUtils.join(@config.get('GEAR_BASE_DIR'), uuid, '.auth', 'token')
+        auth_iv = PathUtils.join(@config.get('GEAR_BASE_DIR'), uuid, '.auth', 'iv')
+        if File.exist?(auth_token) && File.exist?(auth_iv)
+          params = {
+            'broker_auth_key' => File.read(auth_token).chomp,
+            'broker_auth_iv' => File.read(auth_iv).chomp
+          }
+        else
+          params = nil
+        end
+        params
       end
     end
   end
