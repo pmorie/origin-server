@@ -168,8 +168,7 @@ class ScalingFuncTest < OpenShift::NodeBareTestCase
       assert_equal 2, web_entries.keys.size
 
       # make sure the http content is good
-      web_entries.values.each do |entry| 
-        OpenShift::Runtime::NodeLogger.logger.info("Checking title for #{entry}")
+      web_entries.values.each do |entry|
         assert_http_title_for_entry entry, DEFAULT_TITLE
       end
     else
