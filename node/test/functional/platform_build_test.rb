@@ -20,7 +20,7 @@ require 'net/http'
 require 'fileutils'
 require 'restclient/request'
 
-class ScalingFuncTest < OpenShift::NodeBareTestCase
+class PlatformBuildFuncTest < OpenShift::NodeBareTestCase
   DEFAULT_TITLE = "Welcome to OpenShift"
   CHANGED_TITLE = "Test1"
 
