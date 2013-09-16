@@ -246,7 +246,7 @@ module OpenShift
           if @cartridge_model.web_proxy
             web_entries = ::OpenShift::Runtime::GearRegistry.new(self).entries[:web]
             web_entries_excluding_self = web_entries.select { |gear_uuid, entry| gear_uuid != @uuid }
-            web_entries_excluding_self.map { |gear_uuid, entry| "#{gear_uuid}@#{entry.proxy_ip}" }
+            web_entries_excluding_self.map { |gear_uuid, entry| "#{gear_uuid}@#{entry.proxy_hostname}" }
           else
             []
           end
@@ -939,9 +939,9 @@ module OpenShift
           cloud_domain = @config.get("CLOUD_DOMAIN")
           set_proxy_input = []
           cluster.split(' ').each do |line|
-            gear_uuid, gear_name, namespace, proxy_ip, proxy_port = line.split(',')
+            gear_uuid, gear_name, namespace, proxy_hostname, proxy_port = line.split(',')
             gear_dns = "#{gear_name}-#{namespace}.#{cloud_domain}"
-            set_proxy_input << "#{gear_dns}|#{proxy_ip}:#{proxy_port}"
+            set_proxy_input << "#{gear_dns}|#{proxy_hostname}:#{proxy_port}"
 
             # add the entry to the gear registry
             new_entry = {
@@ -949,7 +949,7 @@ module OpenShift
               uuid: gear_uuid,
               namespace: namespace,
               dns: gear_dns,
-              proxy_ip: proxy_ip,
+              proxy_hostname: proxy_hostname,
               proxy_port: proxy_port
             }
             logger.info "Adding new web entry: #{new_entry}"
@@ -957,14 +957,14 @@ module OpenShift
           end
 
           proxies.split(' ').each do |line|
-            gear_uuid, gear_name, namespace, proxy_ip = line.split(',')
+            gear_uuid, gear_name, namespace, proxy_hostname = line.split(',')
             gear_dns = "#{gear_name}-#{namespace}.#{cloud_domain}"
             new_entry = {
               type: :proxy,
               uuid: gear_uuid,
               namespace: namespace,
               dns: gear_dns,
-              proxy_ip: proxy_ip,
+              proxy_hostname: proxy_hostname,
               proxy_port: 0
             }
             logger.info "Adding new proxy entry: #{new_entry}"
@@ -990,7 +990,7 @@ module OpenShift
 
             unless new_web_gears.empty?
               # convert the new gears to the format uuid@ip
-              ssh_urls = new_web_gears.map { |e| "#{e.uuid}@#{e.proxy_ip}" }
+              ssh_urls = new_web_gears.map { |e| "#{e.uuid}@#{e.proxy_hostname}" }
 
               # sync from this gear (load balancer) to all new gears
               # copy app-deployments and make all the new gears look just like it (i.e., use --delete)
@@ -1015,7 +1015,7 @@ module OpenShift
 
             unless new_proxy_gears.empty?
               # convert the new gears to the format uuid@ip
-              ssh_urls = new_proxy_gears.map { |e| "#{e.uuid}@#{e.proxy_ip}" }
+              ssh_urls = new_proxy_gears.map { |e| "#{e.uuid}@#{e.proxy_hostname}" }
 
               # sync from this gear (load balancer) to all new proxy gears
               # copy the git repo
