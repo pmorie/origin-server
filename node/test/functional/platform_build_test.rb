@@ -118,7 +118,7 @@ class PlatformBuildFuncTest < OpenShift::NodeBareTestCase
     create_application(app_name, %w(jenkins-1), false)
   end
 
-  def basic_build_test(cartridges, scaling = true)
+  def basic_build_test(cartridges, scaling = true, force_clean_build = false)
     app_name = "app#{random_string}"
 
     app_id = create_application(app_name, cartridges, scaling)
@@ -157,7 +157,6 @@ class PlatformBuildFuncTest < OpenShift::NodeBareTestCase
       assert_equal local_hostname, entry.proxy_hostname
       assert_equal 0, entry.proxy_port.to_i
 
-
       # scale up to 2
       assert_scales_to app_name, framework, 2
 
@@ -175,19 +174,7 @@ class PlatformBuildFuncTest < OpenShift::NodeBareTestCase
       assert_http_title_for_app app_name, @namespace, DEFAULT_TITLE
     end
 
-    # clone the git repo and make a change
-    OpenShift::Runtime::NodeLogger.logger.info("Modifying the title and pushing the change")
-    Dir.chdir(@tmp_dir) do
-      response = RestClient.get("#{@url_base}/applications/#{app_id}", accept: :json)
-      response = JSON.parse(response)
-      git_url = response['data']['git_url']
-      `git clone #{git_url}`
-      Dir.chdir(app_name) do
-        `sed -i "s,<title>.*</title>,<title>#{CHANGED_TITLE}</title>," #{CART_TO_INDEX[framework]}`
-        `git commit -am 'test1'`
-        `git push`
-      end
-    end
+    change_title(CHANGED_TITLE)
 
     if scaling
       # make sure the http content is updated
@@ -219,6 +206,19 @@ class PlatformBuildFuncTest < OpenShift::NodeBareTestCase
     end
   end
 
+  def change_title(title)
+   # clone the git repo and make a change
+    OpenShift::Runtime::NodeLogger.logger.info("Modifying the title and pushing the change")
+    Dir.chdir(@tmp_dir) do
+      `git clone #{@git_url}`
+      Dir.chdir(app_name) do
+        `sed -i "s,<title>.*</title>,<title>#{title}</title>," #{CART_TO_INDEX[framework]}`
+        `git commit -am 'test1'`
+        `git push`
+      end
+    end
+  end
+
   def create_application(app_name, cartridges, scaling = true)
     OpenShift::Runtime::NodeLogger.logger.info("Creating app #{app_name} with cartridges: #{cartridges} with scaling: #{scaling}")
     # timeout is so high because creating a scalable python-3.3 app takes around 2.5 minutes
@@ -226,6 +226,8 @@ class PlatformBuildFuncTest < OpenShift::NodeBareTestCase
     response = RestClient::Request.execute(method: :post, url: "#{@url_base}/domains/#{@namespace}/applications", payload: {name: app_name, cartridges: cartridges, scale: scaling}, headers: {accept: :json}, timeout: 180)
     response = JSON.parse(response)
     app_id = response['data']['id']
+    @git_url = response['data']['git_url']
+    
     @created_app_ids << app_id
     OpenShift::Runtime::NodeLogger.logger.info("Created app #{app_name} with id #{app_id}")
 
