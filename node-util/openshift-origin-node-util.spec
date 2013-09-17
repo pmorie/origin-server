@@ -41,9 +41,11 @@ cp -p bin/oo-* %{buildroot}%{_sbindir}/
 rm %{buildroot}%{_sbindir}/oo-snapshot
 rm %{buildroot}%{_sbindir}/oo-restore
 rm %{buildroot}%{_sbindir}/oo-config-eval
+rm %{buildroot}%{_sbindir}/oo-sdk
 cp -p bin/rhc-* %{buildroot}%{_bindir}/
 cp -p bin/oo-snapshot %{buildroot}%{_bindir}/
 cp -p bin/oo-restore %{buildroot}%{_bindir}/
+cp -p bin/oo-sdk %{buildroot}%{_bindir}/
 cp -p bin/oo-config-eval %{buildroot}%{_bindir}/
 cp -p bin/unidle_gear.sh %{buildroot}%{_bindir}/
 
