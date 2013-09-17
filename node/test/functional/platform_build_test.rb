@@ -118,7 +118,7 @@ class PlatformBuildFuncTest < OpenShift::NodeBareTestCase
     create_application(app_name, %w(jenkins-1), false)
   end
 
-  def basic_build_test(cartridges, scaling = true, force_clean_build = false)
+  def basic_build_test(cartridges, scaling = true)
     app_name = "app#{random_string}"
 
     app_id = create_application(app_name, cartridges, scaling)
