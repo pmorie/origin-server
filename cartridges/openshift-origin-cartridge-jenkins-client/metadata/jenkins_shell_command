@@ -9,7 +9,7 @@ rsync $upstream_ssh:'$OPENSHIFT_DEPENDENCIES_DIR' $OPENSHIFT_DEPENDENCIES_DIR
 set -e
 
 # Build/update libs and run user pre_build and build
-gear build
+gear build --git-ref $GIT_BRANCH
 
 # Run tests here
 
@@ -21,6 +21,7 @@ $GIT_SSH $upstream_ssh "gear stop --conditional --exclude-web-proxy --git-ref $G
 deployment_dir=`$GIT_SSH $upstream_ssh 'gear create-deployment-dir'`
 
 # Push content back to application
+rsync $WORKSPACE/../metadata.json $upstream_ssh:app-deployments/$deployment_dir/metadata.json
 rsync $WORKSPACE/ $upstream_ssh:app-deployments/$deployment_dir/repo/
 rsync $OPENSHIFT_BUILD_DEPENDENCIES_DIR $upstream_ssh:app-deployments/$deployment_dir/build-dependencies/
 rsync $OPENSHIFT_DEPENDENCIES_DIR $upstream_ssh:app-deployments/$deployment_dir/dependencies/
