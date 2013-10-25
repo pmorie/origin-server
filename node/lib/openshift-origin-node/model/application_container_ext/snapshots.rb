@@ -16,6 +16,9 @@ module OpenShift
 --exclude=./$OPENSHIFT_GEAR_UUID/*/run/httpd.pid \
 --exclude=./$OPENSHIFT_GEAR_UUID/haproxy-\*/run/stats \
 --exclude=./$OPENSHIFT_GEAR_UUID/app-root/runtime/.state \
+--exclude=./$OPENSHIFT_GEAR_UUID/app-root/runtime/repo \
+--exclude=./$OPENSHIFT_GEAR_UUID/app-root/runtime/dependencies \
+--exclude=./$OPENSHIFT_GEAR_UUID/app-root/runtime/build-dependencies \
 --exclude=./$OPENSHIFT_DATA_DIR/.bash_history \
           #{exclusions} ./$OPENSHIFT_GEAR_UUID
 }
@@ -114,6 +117,10 @@ module OpenShift
             $stderr.puts "depending on the amount of data to be restored and the restore procedure used by your application's cartridges."
           end
 
+          result = {
+            status: RESULT_FAILURE
+          }
+
           gear_env = ::OpenShift::Runtime::Utils::Environ.for_gear(@container_dir)
 
           scalable_restore = !!@cartridge_model.web_proxy
@@ -160,11 +167,23 @@ module OpenShift
                                         out: $stdout)
           end
 
-          if restore_git_repo
-            post_receive(err: $stderr, out: $stdout)
-          else
-            start_gear
+          options = {}
+          options[:deployment_datetime] = current_deployment_datetime
+          options[:out] = $stdout
+          options[:err] = $stderr
+
+          distribute_result = result[:distribute_result] = distribute(options)
+          return result unless distribute_result[:status] == RESULT_SUCCESS
+
+          activate_result = result[:activate_result] = activate(options)
+          return result unless activate_result[:status] == RESULT_SUCCESS
+
+          if gear_env['OPENSHIFT_APP_DNS'] == gear_env['OPENSHIFT_GEAR_DNS']
+            report_deployments(gear_env)
           end
+
+          result[:status] = RESULT_SUCCESS
+          result
         end
 
         def prepare_for_restore(restore_git_repo, gear_env)
@@ -172,6 +191,7 @@ module OpenShift
             app_name = gear_env['OPENSHIFT_APP_NAME']
             $stderr.puts "Removing old git repo: ~/git/#{app_name}.git/"
             FileUtils.rm_rf(Dir.glob(PathUtils.join(@container_dir, 'git', "#{app_name}.git", '[^h]*', '*')))
+            FileUtils.rm_rf(Dir.glob(PathUtils.join(@container_dir, 'app-deployments', '*')))
           end
 
           $stderr.puts "Removing old data dir: ~/app-root/data/*"
@@ -181,7 +201,7 @@ module OpenShift
         end
 
         def extract_restore_archive(transforms, restore_git_repo, gear_env)
-          includes = %w(./*/app-root/data)
+          includes = %w(./*/app-root/data ./*/app-deployments)
           excludes = %w(./*/app-root/runtime/data)
           transforms << 's|${OPENSHIFT_GEAR_NAME}/data|app-root/data|'
           transforms << 's|git/.*\.git|git/${OPENSHIFT_GEAR_NAME}.git|'
