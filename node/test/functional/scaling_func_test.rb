@@ -18,7 +18,6 @@ require_relative '../test_helper'
 require 'socket'
 require 'net/http'
 require 'fileutils'
-require 'restclient/request'
 
 class ScalingFuncTest < OpenShift::NodeBareTestCase
   def setup

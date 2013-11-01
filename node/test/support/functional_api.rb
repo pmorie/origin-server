@@ -277,14 +277,25 @@ EOFZ
   end
 
   def archive_deployment(app_id)
-    ssh_command(app_id, "\"gear archive-deployment\" > #{@tmp_dir}/#{app_id}_archive.tar.gz")
+    archive = "#{@tmp_dir}/#{app_id}_archive.tar.gz"
+    ssh_command(app_id, "\"gear archive-deployment\" > #{archive}")
+    archive
+  end
 
-    "#{@tmp_dir}/#{app_id}_archive.tar.gz"
+  def snapshot(app_id)
+    archive = "#{tmp_dir}/#{app_id}.tar.gz"
+    ssh_command(app_id, "\"gear snapshot\" > #{archive}")
+    archive
   end
 
   def deploy_artifact(app_id, app_name, file)
     logger.info("Deploying #{file} to app #{app_name}")
     logger.info `cat #{file} | ssh -o 'StrictHostKeyChecking=no' #{app_id}@localhost gear binary-deploy`
+  end
+
+  def restore(app_id, app_name, file)
+    logger.info("Restoring #{file} to app #{app_name}")
+    logger.info `cat #{file} | ssh -o 'StrictHostKeyChecking=no' #{app_id}@localhost gear restore --include-git-repo`
   end
 
   def cloud_domain
