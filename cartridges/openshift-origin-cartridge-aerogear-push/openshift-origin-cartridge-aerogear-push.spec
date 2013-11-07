@@ -1,5 +1,6 @@
 %global cartridgedir %{_libexecdir}/openshift/cartridges/aerogear-push
 %global jbossver 7.1.1.Final
+%global aerogearver 0.9.0
 
 Summary:       Provides the AeroGear UnifiedPush Server on top of JBossAS7
 Name:          openshift-origin-cartridge-aerogear-push
@@ -8,7 +9,9 @@ Release:       1%{?dist}
 Group:         Development/Languages
 License:       ASL 2.0
 URL:           http://www.openshift.com
-Source0:       https://github.com/fjuma/openshift-origin-cartridge-aerogear-push/archive/master.zip
+Source0:       https://github.com/fjuma/cartridgesource/blob/master/openshift-origin-cartridge-aerogear-push.tar.gz?raw=true
+Requires:      aerogear-simplepush-server >= %{aerogearver}
+Requires:      aerogear-unifiedpush-server >= %{aerogearver}
 Requires:      rubygem(openshift-origin-node)
 Requires:      openshift-origin-node-util
 Requires:      lsof
@@ -65,9 +68,12 @@ alternatives --install /etc/alternatives/jbossas-7 jbossas-7 /usr/share/jboss-as
 alternatives --set jbossas-7 /usr/share/jboss-as
 %endif
 
+alternatives --install /etc/alternatives/aerogear-push-0 aerogear-push-0 /opt/aerogear-push-%{aerogearver} 102
+alternatives --set aerogear-push-0 /opt/aerogear-push-%{aerogearver}
+
 # Add the AeroGear SimplePush module
 mkdir -p %{cartridgedir}/usr/modules/org/jboss/aerogear/simplepush/main
-ln -fs %{cartridgedir}/versions/0.8.0/modules/org/jboss/aerogear/simplepush/main/* %{cartridgedir}/usr/modules/org/jboss/aerogear/simplepush/main
+ln -fs /etc/alternatives/aerogear-push-0/modules/org/jboss/aerogear/simplepush/main/* %{cartridgedir}/usr/modules/org/jboss/aerogear/simplepush/main
 
 
 %postun
@@ -82,6 +88,8 @@ if [ $1 -eq 0 ]; then
   %if 0%{?fedora}
     alternatives --remove jbossas-7 /usr/share/jboss-as
   %endif
+
+  alternatives --remove aerogear-push-0 /opt/aerogear-push-%{aerogearver}
 fi
 
 
@@ -89,7 +97,7 @@ fi
 %files
 %dir %{cartridgedir}
 %attr(0755,-,-) %{cartridgedir}/bin/
-%attr(0755,-,-) %{cartridgedir}/versions/0.8.0/bin/
+%attr(0755,-,-) %{cartridgedir}/versions/0/bin/
 %attr(0755,-,-) %{cartridgedir}/hooks/
 %{cartridgedir}
 %doc %{cartridgedir}/README.md
