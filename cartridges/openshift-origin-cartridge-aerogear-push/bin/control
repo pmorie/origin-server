@@ -89,22 +89,22 @@ function waitondeployments() {
         popd
 
         if [ ${#artifactsskipped[@]} -gt 0 ]; then
-          client_result "Artifacts skipped because of deployment-scanner configuration: ${artifactsskipped[*]}"
+          echo "Artifacts skipped because of deployment-scanner configuration: ${artifactsskipped[*]}"
         fi
 
         if [ ${#artifactsfailed[@]} -gt 0 ]; then
-          client_result "Failed deployments: ${artifactsfailed[*]}"
+          echo "Failed deployments: ${artifactsfailed[*]}"
         fi
 
         if [ ${#artifactsdeployed[@]} -gt 0 ]; then
-          client_result "Artifacts deployed: ${artifactsdeployed[*]}"
+          echo "Artifacts deployed: ${artifactsdeployed[*]}"
         fi
 
         if [ ${#artifactsunknown[@]} -gt 0 ]; then
-          client_result "Artifacts in an unknown state: ${artifactsunknown[*]}"
+          echo "Artifacts in an unknown state: ${artifactsunknown[*]}"
         fi
       else
-          client_message "Deployment scanner disabled, skipping deployment verification"
+          echo "Deployment scanner disabled, skipping deployment verification"
       fi
     fi
 }
@@ -270,11 +270,13 @@ function threaddump() {
         kill -3 $java_pid
         client_result "Success"
         client_result ""
-        client_result "The thread dump file will be available via: rhc tail $OPENSHIFT_APP_NAME -f ${OPENSHIFT_TMP_DIR}${cartridge_type}.log -o '-n 250'"
+        client_result "The thread dump file will be available via: rhc tail $OPENSHIFT_APP_NAME -g $OPENSHIFT_GEAR_UUID -f ${OPENSHIFT_TMP_DIR}${cartridge_type}.log -o '-n 250'"
     else 
         echo "Failed to locate JBOSS PID File"
     fi
 }
+
+export OPENSHIFT_SECRET_TOKEN=${OPENSHIFT_SECRET_TOKEN:-OPENSHIFT_APP_UUID}
 
 case "$1" in
   start)           start ;;
